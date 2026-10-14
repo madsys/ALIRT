@@ -44,6 +44,15 @@ else
            /etc/yum.repos.d/CentOS-Base.repo
     yum install -y gcc make bc bison flex elfutils-libelf-devel \
                    openssl-devel cpio curl tar xz perl
+    if [ "$ARCH" = "x86_64" ] && [ "$RUNTIME" = "true" ]; then
+        # CentOS 7 has no qemu-system-x86 / busybox-static packages:
+        # qemu-kvm provides the system emulator, and a static busybox
+        # is fetched for the initramfs.
+        yum install -y qemu-kvm
+        curl -fsSL -o /bin/busybox \
+            "https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox"
+        chmod +x /bin/busybox
+    fi
 fi
 
 echo "===== [2/4] Building kernel linux-${KVER} (${ARCH}) ====="
@@ -95,7 +104,9 @@ if [ "$RUNTIME" = "true" ]; then
 
     KVM=""
     [ -w /dev/kvm ] && KVM="-enable-kvm"
-    timeout 300 qemu-system-x86_64 $KVM -m 512M -smp 2 \
+    # CentOS 7 ships the emulator as /usr/libexec/qemu-kvm
+    QEMU_BIN="$(command -v qemu-system-x86_64 || echo /usr/libexec/qemu-kvm)"
+    timeout 300 "$QEMU_BIN" $KVM -m 512M -smp 2 \
         -kernel "$KDIR/arch/x86/boot/bzImage" \
         -initrd /ir.cpio.gz \
         -append "console=ttyS0,115200 loglevel=8 panic=10" \

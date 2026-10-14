@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { kver: "3.10.108", image: "centos:7",     arch: "x86_64",  runtime: false }
+          - { kver: "3.10.108", image: "centos:7",     arch: "x86_64",  runtime: true }
           - { kver: "4.4.302",  image: "ubuntu:16.04", arch: "x86_64",  runtime: true }
           - { kver: "4.19.325", image: "ubuntu:18.04", arch: "x86_64",  runtime: true }
           - { kver: "5.4.290",  image: "ubuntu:20.04", arch: "x86_64",  runtime: true }
