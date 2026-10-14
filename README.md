@@ -6,7 +6,18 @@
 
 ALIRT (Advanced Linux incident response tool, formerly known as **AIRT**) is a
 set of Linux-based tools for incident response, specifically designed to detect
-kernel backdoors on the Linux platform. It's useful when you want to know what
+kernel backdoors on the Linux platform. 
+Compared to other kernel-based malware detection systems, ALIRT occupies a 
+unique position: 
+1. No signatures required; complements signature-based tools (such as the rkhunter family);
+2. Unlike the “proactive, resident” approach of LKRG/Tracee, it focuses on 
+post-incident response: even after an attacker has wiped logs and hidden modules, 
+traces can still be detected when programs are launched from a trusted medium;
+3. Unlike Volatility’s offline image analysis, it performs real-time online inspection 
+without requiring a system shutdown for forensics. It fully covers the “online but 
+not pre-installed” gap in the “online-offline” spectrum.
+
+It's useful when you want to know what
 evil kernel backdoor is still resident on your broken system and what the hell
 it is. ALIRT consists of 5 useful tools:
 
