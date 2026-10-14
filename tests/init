@@ -1,0 +1,28 @@
+#!/bin/busybox sh
+# ALIRT QEMU runtime detection test — /init of the initramfs
+# Flow: insert the self-hiding sample module -> insert mod_hunter -> check
+# whether the hidden module is detected
+/bin/busybox --install -s /bin
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+exec >/dev/console 2>&1
+
+echo "=== ALIRT runtime test start ==="
+
+insmod /ko/hide_self.ko && echo "[TEST] hide_self loaded (unlinked from the module list)"
+insmod /ko/mod_hunter.ko || { echo "RESULT: FAIL (mod_hunter failed to load)"; poweroff -f; }
+
+# Trigger the scan: mod_hunter scans and reports on /proc/showmodules read
+cat /proc/showmodules
+
+# mod_hunter v0.5.0 verdicts: [CRITICAL]=hidden from list+kset,
+# [HIGH]=in kset but missing from the module list (unlinked = hidden).
+# Either verdict means the scanner found a module the list does not show.
+if dmesg | grep -qE "mod_hunter: \[(CRITICAL|HIGH)\]"; then
+    echo "RESULT: PASS (suspicious struct module not in the module list found)"
+else
+    echo "RESULT: FAIL (hidden module not detected)"
+fi
+
+echo "=== ALIRT runtime test end ==="
+poweroff -f

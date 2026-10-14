@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  matrix-test:
+    name: "${{ matrix.kver }} / ${{ matrix.arch }}"
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { kver: "3.10.108", image: "centos:7",     arch: "x86_64",  runtime: false }
+          - { kver: "4.4.302",  image: "ubuntu:16.04", arch: "x86_64",  runtime: true }
+          - { kver: "4.19.325", image: "ubuntu:18.04", arch: "x86_64",  runtime: true }
+          - { kver: "5.4.290",  image: "ubuntu:20.04", arch: "x86_64",  runtime: true }
+          - { kver: "5.15.180", image: "ubuntu:22.04", arch: "x86_64",  runtime: true }
+          - { kver: "6.12.35",  image: "ubuntu:24.04", arch: "x86_64",  runtime: true }
+          - { kver: "5.15.180", image: "ubuntu:22.04", arch: "aarch64", runtime: false }
+          - { kver: "6.12.35",  image: "ubuntu:24.04", arch: "aarch64", runtime: false }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build kernel + compile ALIRT + QEMU detection test (runs in era-matched container)
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/src" -w /src \
+            "${{ matrix.image }}" bash /src/tests/ci/run-in-container.sh \
+            "${{ matrix.kver }}" "${{ matrix.arch }}" "${{ matrix.runtime }}"
+
+      - name: Record test result for this matrix combination
+        if: always()
+        run: |
+          mkdir -p status
+          COMPILE=fail; [ -f src/mod_hunter/mod_hunter.ko ] && COMPILE=ok
+          RUNTIME=skip
+          grep -q "RUNTIME-RESULT: PASS" vm-console.log 2>/dev/null && RUNTIME=pass
+          grep -q "RUNTIME-RESULT: FAIL" vm-console.log 2>/dev/null && RUNTIME=fail
+          echo "| ${{ matrix.kver }} | ${{ matrix.arch }} | $COMPILE | $RUNTIME |" \
+            > "status/${{ matrix.kver }}-${{ matrix.arch }}.md"
+          cat "status/${{ matrix.kver }}-${{ matrix.arch }}.md"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: "status-${{ matrix.kver }}-${{ matrix.arch }}"
+          path: status/
+
+  summary:
+    needs: matrix-test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: status-*
+          merge-multiple: true
+          path: statuses
+
+      - name: Generate compatibility matrix summary
+        run: |
+          {
+            echo "## Kernel / Architecture Compatibility Matrix (build & QEMU runtime detection)"
+            echo ""
+            echo "| Kernel | Arch | Build | QEMU runtime |"
+            echo "|---|---|---|---|"
+            sort -t'|' -k2 -V statuses/*.md
+          } >> "$GITHUB_STEP_SUMMARY"

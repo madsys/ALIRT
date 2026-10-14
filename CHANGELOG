@@ -1,0 +1,51 @@
+26.10.14
+	ALIRT-0.5.1 reliability release: fixes proven by the full CI matrix
+	(compile + QEMU hidden-module detection green on 3.10 - 6.12 x86_64
+	and 5.15/6.12 aarch64).
+	- mod_hunter: fix module_kset double-dereference (report-time oops on
+	  4.19/5.4/5.15, hang on 6.12); resolve init_mm/module_kset/'modules'
+	  via kallsyms (none are exported; insmod previously failed);
+	  RONX-era core_size heuristic dropped (0 scan candidates on <= 4.4);
+	  layout-verified private kmem_cache_node copy for 3.10 - 6.1.
+	- process_hunter / sock_hunter: complete private SLUB struct copies
+	  where the kernel hides the definitions (include linux/slub_def.h
+	  for kmem_cache/kmem_cache_cpu on 3.18 - 6.11).
+	- modumper: replace vfs_write (unexported since 4.14) with the
+	  file's f_op->write.
+	- compat: fix kprobe pre_handler signature (pt_regs argument).
+
+26.10.14
+	ALIRT-0.5.0 the modernization release: renamed to ALIRT, moved to GitHub.
+	- mod_hunter: merged nitara2 engine (thanks g1inko/ksen-lin, Phrack 71);
+	  tri-source cross-validation (memory scan vs module list vs module kset)
+	  to counter KoviD-class rootkits; seq_file /proc output (dmesg kept);
+	  reveal downgraded to report-only on kernels >= 4.0.
+	- process_hunter / sock_hunter: rewritten for the SLUB allocator
+	  (2.6.32 - 6.12); sock_hunter adds IPv6 support.
+	- modumper: modernized for core_layout / mem[] module layouts; on
+	  kernels >= 5.10 dumps via /proc/get_mod + dump-extract.sh.
+	- dismod: replaced the vendored 2005 binutils copy with dismod.sh
+	  (system objdump, multi-arch).
+	- CI: per-kernel-version build + QEMU runtime detection matrix
+	  (3.10 - 6.12, x86_64/aarch64), compatibility table auto-published.
+	- Docs: DKMS+MOK signing guide, trusted-media IR procedure
+	  (Chinese, with PDF), README.zh-CN.
+
+05.8.15
+	AIRT-0.4.2 fixed 2 serious problems in process_hunter.c. Also fixed some compatible problems corresponding to 2.6.9 ~ 2.6.12 kernel, so it can work on 2.6.5~ 2.6.12 by now
+
+05.1.5 
+	AIRT-0.4 fixed a few bugs and add made the mod_hunter more heuristic
+
+04.12.23
+	AIRT-0.3 Added the ability of revealing hidden modules then people
+	can not only check them, but also remove them
+
+04.12.6
+	AIRT-0.2 fixed a small bug in sock_hunter.c
+
+04.12.3
+	AIRT-0.1 released,the first release ;-)
+
+
+

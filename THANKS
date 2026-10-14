@@ -1,0 +1,18 @@
+# ALIRT THANKS
+
+ALIRT builds on the work of many people. In particular:
+- **madsys** — original author of module_hunter and the "Finding hidden kernel
+  modules (the extrem way)" technique (Phrack 61-3, 2005).
+
+- **CoolQ** — co-author of the original AIRT tools (2004-2005), including the
+  4g/4g patch and PAE groundwork in the original mod_hunter.
+
+- **g1inko (ksen-lin)** — author of [nitara2](https://github.com/ksen-lin/nitara2),
+  the modern x86_64 reimplementation of the mod_hunter technique
+  (Phrack 71, 2024), merged into ALIRT v0.5.0 as the new mod_hunter engine.
+
+- **The DFRWS 2025 paper "Detecting Hidden Kernel Modules in Memory Snapshots"**
+  (CrySyS Lab) — the multi-source cross-validation approach that inspired the
+  tri-source verification in v0.5.0.
+
+Thanks to everyone who has reported bugs, rootkit samples and ideas over the years

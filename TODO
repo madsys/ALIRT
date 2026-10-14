@@ -1,0 +1,14 @@
+o printk can be replaced by attacker so a secure way for output is necessary.
+o Change moddumper to Client/Server architeture to reduce disk write.
+o Add PAE support for mod_hunter.
+o Add more architecture support.
+o Add IPv6 support.
+o The latest version supporting the Linux kernel 6.2 was developed by g1inko. We plan to integrate the code into the project.
+ Phrack Issue #71, Phile #0x0C of 0x11
+ title: Finding hidden kernel modules (extrem way reborn)
+ article: https://phrack.org/issues/71/finding-hidden-kernel-modules-extrem-way-reborn_md
+o Add support for the 5.x, 4.x, 3.x kernels.
+o Improve dismod to handle symbols within the dump.
+o Improve dismod to identify obfuscated code and segment separation.
+
+YOU CAN GIVE US MORE IDEAS, THANK YOU!
