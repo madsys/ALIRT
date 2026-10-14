@@ -1,6 +1,6 @@
 # ALIRT — Advanced Linux Incident Response Tool
 
-**Developed and maintained by madsys, coolq — v0.5.1**
+**Developed and maintained by madsys, coolq — v0.5.2**
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 

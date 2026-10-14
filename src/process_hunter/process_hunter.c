@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 /*
- * process_hunter.c - ALIRT hidden process hunter (v0.5.1)
+ * process_hunter.c - ALIRT hidden process hunter (v0.5.2)
  *
  * SLUB-era re-implementation of the original process_hunter idea: walk
  * every object slot in the kernel's "task_struct" kmem cache and
@@ -235,7 +235,7 @@ typedef struct kmem_cache ph_kcache;
 typedef struct ph_kmem_cache_node ph_knode;
 #endif /* >= 6.12 */
 
-#define PH_VERSION		"0.5.1"
+#define PH_VERSION		"0.5.2"
 
 #define PH_PROC_NAME		"showprocess"	/* keep the original name */
 #define PH_PROC_MODE		S_IRUSR

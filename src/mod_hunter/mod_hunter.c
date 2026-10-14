@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 /*
- * mod_hunter.c - ALIRT hidden kernel module hunter (v0.5.1)
+ * mod_hunter.c - ALIRT hidden kernel module hunter (v0.5.2)
  *
  * Brute-force scanner for struct module objects in the module mapping
  * space, with three-way cross-validation against the kernel's own
@@ -70,7 +70,7 @@
 #define MH_HAVE_MODULE_SPACE 1
 #endif
 
-#define MH_VERSION		"0.5.1"
+#define MH_VERSION		"0.5.2"
 
 #define MH_PROC_NAME		"showmodules"	/* keep the original name */
 #define MH_PROC_MODE		(S_IRUSR | S_IWUSR)

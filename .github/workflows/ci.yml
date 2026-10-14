@@ -21,6 +21,8 @@ jobs:
           - { kver: "5.4.290",  image: "ubuntu:20.04", arch: "x86_64",  runtime: true }
           - { kver: "5.15.180", image: "ubuntu:22.04", arch: "x86_64",  runtime: true }
           - { kver: "6.12.35",  image: "ubuntu:24.04", arch: "x86_64",  runtime: true }
+          - { kver: "6.18.56",  image: "ubuntu:24.04", arch: "x86_64",  runtime: true }
+          - { kver: "7.2.10",   image: "ubuntu:24.04", arch: "x86_64",  runtime: true }
           - { kver: "5.15.180", image: "ubuntu:22.04", arch: "aarch64", runtime: false }
           - { kver: "6.12.35",  image: "ubuntu:24.04", arch: "aarch64", runtime: false }
 

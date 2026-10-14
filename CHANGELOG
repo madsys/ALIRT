@@ -1,3 +1,12 @@
+26.10.15
+	ALIRT-0.5.2 LTS coverage release.
+	- CI: added the longterm kernel 6.18 and the stable kernel 7.2 to
+	  the build + QEMU runtime detection matrix (x86_64): 3.10, 4.4,
+	  4.19, 5.4, 5.15, 6.12, 6.18, 7.2; aarch64 cross-builds for 5.15
+	  and 6.12.
+	- compat: forward-port SLUB / module layout adaptations to 6.18
+	  and 7.2 kernel APIs (see commits).
+
 26.10.14
 	ALIRT-0.5.1 reliability release: fixes proven by the full CI matrix
 	(compile + QEMU hidden-module detection green on 3.10 - 6.12 x86_64

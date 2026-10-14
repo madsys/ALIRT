@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 /*
- * sock_hunter.c - ALIRT hidden socket hunter (v0.5.1)
+ * sock_hunter.c - ALIRT hidden socket hunter (v0.5.2)
  *
  * Passive enumerator of struct sock objects straight out of the SLUB
  * caches that back the TCP/UDP/RAW protocol families ("TCP", "UDP",
@@ -23,7 +23,7 @@
  *         6.2+          : struct slab, slab_cache first (@8),
  *                         list node @16 (mm/slab.h v6.2 .. v6.12)
  *
- * New in this ALIRT version (v0.5.1):
+ * New in this ALIRT version (v0.5.2):
  *   - SLAB -> SLUB migration (three-era slab container support, see
  *     above; struct kmem_cache is taken from the public
  *     <linux/slub_def.h> up to 6.11 and from a layout-verified private
@@ -99,7 +99,7 @@ static int sh_resolve_kallsyms(void)
 	return alirt_resolve_kln(&sh_lookup_name);
 }
 
-#define SH_VERSION		"0.5.1"
+#define SH_VERSION		"0.5.2"
 
 #define SH_PROC_NAME		"showsocks"	/* keep the original name */
 #define SH_PROC_MODE		S_IRUSR
