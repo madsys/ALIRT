@@ -381,7 +381,7 @@ static void mh_scan(struct mh_result *r)
 		/* struct looks valid but its list pointers were zeroed
 		 * instead of poisoned: classic in-place hiding marker */
 		f->list_ptrs_wiped = !mod->list.next || !mod->list.prev;
-		strncpy(f->name, mod->name, sizeof(f->name) - 1);
+		alirt_strscpy(f->name, mod->name, sizeof(f->name));
 		f->name[sizeof(f->name) - 1] = '\0';
 	}
 	r->steps = steps;

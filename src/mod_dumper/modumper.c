@@ -372,7 +372,7 @@ static int md_open(struct inode *inode, struct file *file)
 	d->init_base = (unsigned long)alirt_mod_init_base(mod);
 	d->init_size = alirt_mod_init_size(mod);
 	d->init_freed = (!d->init_base || !d->init_size);
-	strncpy(d->name, mod->name, sizeof(d->name) - 1);
+	alirt_strscpy(d->name, mod->name, sizeof(d->name));
 
 	if (!d->core_base || !d->core_size) {
 		pr_err("modumper: '%s' has no core image (base=0x%lx size=0x%lx), refusing dump\n",

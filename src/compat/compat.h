@@ -28,6 +28,26 @@
 #endif
 
 /* ================================================================
+ * 1b. String copy helper
+ *     Kernel 7.2 removed strncpy(); strscpy() exists only since 4.3.
+ *     One local implementation keeps every ALIRT module building on
+ *     2.6.32 through 7.x without version conditionals.
+ * ================================================================ */
+static inline ssize_t alirt_strscpy(char *dst, const char *src, size_t size)
+{
+	size_t len;
+
+	if (!size)
+		return 0;
+	len = strlen(src);
+	if (len >= size)
+		len = size - 1;
+	memcpy(dst, src, len);
+	dst[len] = '\0';
+	return (ssize_t)len;
+}
+
+/* ================================================================
  * 2. struct module layout
  *    <= 4.4        : module_core / core_size / init_size / module_init
  *    4.5 ~ 6.3     : core_layout.{base,size} / init_layout.{base,size}
