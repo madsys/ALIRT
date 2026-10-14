@@ -39,10 +39,11 @@ it is. ALIRT consists of 5 useful tools:
 1. [What is ALIRT?](#what-is-alirt)
 2. [How can I use it?](#how-can-i-use-it)
 3. [What platforms does it support now?](#what-platforms-does-it-support-now)
-4. [Where can I get the latest version?](#where-can-i-get-the-latest-version)
-5. [How can I report a bug?](#how-can-i-report-a-bug)
-6. [Documentation](#documentation)
-7. [License](#license)
+4. [Tested kernel versions](#tested-kernel-versions)
+5. [Where can I get the latest version?](#where-can-i-get-the-latest-version)
+6. [How can I report a bug?](#how-can-i-report-a-bug)
+7. [Documentation](#documentation)
+8. [License](#license)
 
 ## What is ALIRT?
 
@@ -132,7 +133,7 @@ $ src/mod_dumper/dismod.sh dump.dat        # or: src/mod_dumper/dismod.pl
 
 ## What platforms it support now?
 
-- **x86_64**: kernel 3.10 — 6.12 (CI-verified matrix); 2.6.32+ covered by
+- **x86_64**: kernel 3.10 — 7.2 (CI-verified matrix); 2.6.32+ covered by
   version conditionals. Other architectures (arm64, armv7, mips, powerpc,
   riscv) are stubbed in `src/arch/` — they compile and load with a clear
   "not yet supported" message.
@@ -140,6 +141,31 @@ $ src/mod_dumper/dismod.sh dump.dat        # or: src/mod_dumper/dismod.pl
   against a self-hiding sample in QEMU) across the kernel matrix — see
   `.github/workflows/ci.yml` and the compatibility matrix in the latest
   CI run summary.
+
+## Tested kernel versions
+
+Every version below is verified by GitHub Actions CI on **every push**:
+all ALIRT tools are compiled against the exact kernel source and
+`mod_hunter` must detect a self-hiding sample module in a QEMU boot of
+that kernel.
+
+**x86_64 — build + QEMU runtime detection (hidden-module test):**
+
+| Kernel | Status |
+|---|---|
+| 3.10.108 | ✅ build + runtime detection |
+| 4.4.302 | ✅ build + runtime detection |
+| 4.19.325 | ✅ build + runtime detection |
+| 5.4.290 | ✅ build + runtime detection |
+| 5.15.180 | ✅ build + runtime detection |
+| 6.12.35 (longterm) | ✅ build + runtime detection |
+| 6.18.56 (longterm) | ✅ build + runtime detection |
+| 7.2.10 | ✅ build + runtime detection |
+
+**aarch64 — cross-compiled (no runtime test yet):** 5.15.180, 6.12.35
+
+The live, always-current version of this table is the compatibility
+matrix in the latest [CI run summary](https://github.com/madsys/ALIRT/actions/workflows/ci.yml).
 
 ## Where can I get the latest version?
 
