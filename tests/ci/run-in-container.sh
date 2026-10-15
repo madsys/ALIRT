@@ -249,9 +249,14 @@ if [ "$RUNTIME" = "true" ]; then
     fi
 
     if grep -q "RESULT: PASS" /src/vm-console.log; then
-        echo "RUNTIME-RESULT: PASS"
+        # Also append the marker to vm-console.log itself: the workflow's
+        # status-record step greps that file, and the x86_64 guest init
+        # only prints "RESULT: ..." (the cross-arch init prints the
+        # RUNTIME-RESULT form).  Without this the matrix shows "skip"
+        # for every x86_64 runtime row even when the test ran and passed.
+        echo "RUNTIME-RESULT: PASS" | tee -a /src/vm-console.log
     else
-        echo "RUNTIME-RESULT: FAIL"
+        echo "RUNTIME-RESULT: FAIL" | tee -a /src/vm-console.log
         exit 1
     fi
 fi

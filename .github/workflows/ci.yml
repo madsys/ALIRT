@@ -65,7 +65,7 @@ jobs:
           RUNTIME=skip
           grep -q "RUNTIME-RESULT: PASS" vm-console.log 2>/dev/null && RUNTIME=pass
           grep -q "RUNTIME-RESULT: FAIL" vm-console.log 2>/dev/null && RUNTIME=fail
-          echo "| ${{ matrix.kver }} | ${{ matrix.arch }} | $COMPILE | $RUNTIME |" \
+          echo "| ${{ matrix.kver }} | ${{ matrix.arch }}${{ matrix.tag }} | $COMPILE | $RUNTIME |" \
             > "status/${{ matrix.kver }}-${{ matrix.arch }}${{ matrix.tag }}.md"
           cat "status/${{ matrix.kver }}-${{ matrix.arch }}${{ matrix.tag }}.md"
 
