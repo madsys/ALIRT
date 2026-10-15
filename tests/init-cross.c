@@ -70,13 +70,10 @@ static int load_module(const char *path, const char *name)
 	return 0;
 }
 
-/* Diagnostic context: dump /proc/modules and the module-related lines of
- * /proc/vmallocinfo so the log shows where the kernel actually placed the
- * modules (the hunter scans a fixed window; a placement outside it or a
- * struct module at an unscanned alignment shows up here).  Call this only
- * while the console is quiet: printk output racing these writes garbles
- * the serial stream, which is why this must run before mod_hunter (whose
- * report printk floods the console) is loaded. */
+/* Diagnostic context: dump /proc/modules so the log confirms the sample
+ * module loaded and unlinked itself.  (/proc/vmallocinfo is useless here:
+ * every kernel prints it with %pK, so without CAP_SYSLOG the addresses
+ * come out as per-boot random hashes - text intact, numbers garbage.) */
 static void dump_modstate(void)
 {
 	static char b[64 * 1024];
@@ -93,33 +90,11 @@ static void dump_modstate(void)
 			off += n;
 		}
 		close(fd);
+		/* hide_self unlinks itself, so an empty file here means the
+		 * unlink worked; listed modules would appear otherwise. */
 		wr("--- /proc/modules (%zd bytes) ---\n", off);
 		if (write(1, b, off) < 0)
 			return;
-	}
-
-	off = 0;
-	fd = open("/proc/vmallocinfo", O_RDONLY);
-	if (fd < 0)
-		return;
-	while (off < (ssize_t)sizeof(b)) {
-		ssize_t n = read(fd, b + off, sizeof(b) - off);
-
-		if (n <= 0)
-			break;
-		off += n;
-	}
-	close(fd);
-	wr("--- /proc/vmallocinfo (module allocations) ---\n");
-	for (ssize_t i = 0, ls = 0; i < off; i++) {
-		if (b[i] == '\n') {
-			if (memmem(b + ls, i - ls, "module", 6)) {
-				ssize_t w = write(1, b + ls, i - ls + 1);
-
-				(void)w;
-			}
-			ls = i + 1;
-		}
 	}
 }
 

@@ -127,18 +127,39 @@
  */
 static struct mm_struct *alirt_mm_init_mm;
 
+/* defined below; the init-time self-test needs the prototype early */
+static inline bool alirt_addr_valid(unsigned long addr, size_t size);
+
 /*
  * Resolve init_mm through kallsyms.  @kln is a working
  * kallsyms_lookup_name (see alirt_resolve_kln() in compat.h; NULL is
  * tolerated).  Returns 0 on success; until then, and on failure,
  * alirt_addr_valid() reports every address as unvalidated.
+ *
+ * On success, run a one-time self-test: a walk that silently rejects
+ * everything is indistinguishable from "nothing in the window", so
+ * validate one direct-map address (init_mm itself) and the caller
+ * module's struct module (the module window the scanner sweeps) and
+ * complain loudly if either fails.
  */
 static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 {
 	if (!kln)
 		return -EINVAL;
 	alirt_mm_init_mm = (struct mm_struct *)kln("init_mm");
-	return alirt_mm_init_mm ? 0 : -ENOENT;
+	if (!alirt_mm_init_mm)
+		return -ENOENT;
+	if (!alirt_addr_valid((unsigned long)alirt_mm_init_mm,
+			      sizeof(*alirt_mm_init_mm)))
+		pr_warn("alirt: armv7 addr_valid self-test: init_mm @ %px REJECTED\n",
+			alirt_mm_init_mm);
+#if defined(MODULE) && defined(THIS_MODULE)
+	if (THIS_MODULE &&
+	    !alirt_addr_valid((unsigned long)THIS_MODULE, sizeof(*THIS_MODULE)))
+		pr_warn("alirt: armv7 addr_valid self-test: THIS_MODULE @ %px REJECTED\n",
+			THIS_MODULE);
+#endif
+	return 0;
 }
 
 /*

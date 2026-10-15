@@ -113,13 +113,16 @@ align_modstruct() {
     case "$sec" in
         ""|UND|UNDEF|ABS)
             echo "WARN: __this_module symbol/section not found in $ko"
-            echo "WARN:   module-ish sections: $(${CROSS}readelf -S "$ko" 2>/dev/null | grep -iE 'this_module|modul' | tr -s ' ' | head -5)"
-            echo "WARN:   symbol: $(${CROSS}objdump -t "$ko" 2>/dev/null | grep this_module | head -2)"
+            echo "WARN:   symbol rows: $(${CROSS}objdump -t "$ko" 2>/dev/null | grep this_module | head -2)"
             return
             ;;
     esac
+    echo "ALIGN: $ko __this_module in $sec; before:"
+    ${CROSS}readelf -S -W "$ko" 2>/dev/null | grep -E " ${sec}[[:space:]]" || true
     ${CROSS}objcopy --set-section-alignment "$sec=16" "$ko" \
-        || echo "WARN: could not align $sec in $ko"
+        || { echo "WARN: objcopy failed on $ko"; return; }
+    echo "ALIGN: after:"
+    ${CROSS}readelf -S -W "$ko" 2>/dev/null | grep -E " ${sec}[[:space:]]" || true
 }
 
 NEED_ALIGN=no
