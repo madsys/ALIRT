@@ -44,7 +44,7 @@ if command -v apt-get >/dev/null 2>&1; then
                  [ "$RUNTIME" = "true" ] && PKGS="$PKGS qemu-system-arm" ;;
         armv7)   PKGS="$PKGS gcc-arm-linux-gnueabihf"
                  [ "$RUNTIME" = "true" ] && PKGS="$PKGS qemu-system-arm" ;;
-        mips)    PKGS="$PKGS gcc-mips-linux-gnu"
+        mips)    PKGS="$PKGS gcc-mipsel-linux-gnu"
                  [ "$RUNTIME" = "true" ] && PKGS="$PKGS qemu-system-mips" ;;
         powerpc) PKGS="$PKGS gcc-powerpc64le-linux-gnu"
                  [ "$RUNTIME" = "true" ] && PKGS="$PKGS qemu-system-ppc" ;;
@@ -83,7 +83,7 @@ case "$ARCH" in
     x86_64)  KARCH=x86;     CROSS="" ;;
     aarch64) KARCH=arm64;   CROSS="aarch64-linux-gnu-" ;;
     armv7)   KARCH=arm;     CROSS="arm-linux-gnueabihf-" ;;
-    mips)    KARCH=mips;    CROSS="mips-linux-gnu-";        ;;
+    mips)    KARCH=mips;    CROSS="mipsel-linux-gnu-"        ;;
     powerpc) KARCH=powerpc; CROSS="powerpc64le-linux-gnu-" ;;
     riscv)   KARCH=riscv;   CROSS="riscv64-linux-gnu-" ;;
     *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
@@ -142,9 +142,9 @@ if [ "$RUNTIME" = "true" ]; then
         # so no per-arch busybox is required.  QEMU machine/console choices:
         #   aarch64 : virt + cortex-a57, PL011 serial -> ttyAMA0
         #   armv7   : virt + cortex-a15, PL011 serial -> ttyAMA0
-        #   mips    : Malta in qemu-system-mips64 (32-bit BE o32 kernel from
-        #             malta_defconfig; the 64-bit Malta CPU runs o32 fine),
-        #             8250 serial -> ttyS0
+        #   mips    : Malta in qemu-system-mips64el (LE o32 malta_defconfig
+        #             kernel; the BE Malta guest is silent under QEMU 8.2
+        #             TCG), 8250 serial -> ttyS0
         #   powerpc : pSeries, hypervisor console -> hvc0
         #   riscv   : virt (OpenSBI bundled with QEMU boots the Image), 8250 -> ttyS0
         "${CROSS}gcc" -O2 -static -Wall -o "$R/init" /src/tests/init-cross.c \
@@ -158,7 +158,7 @@ if [ "$RUNTIME" = "true" ]; then
             armv7)   QEMU="qemu-system-arm -M virt -cpu cortex-a15"
                      KIMG="$KDIR/arch/arm/boot/zImage"
                      CONSOLE="ttyAMA0" ;;
-            mips)    QEMU="qemu-system-mips64 -M malta"
+            mips)    QEMU="qemu-system-mips64el -M malta"
                      KIMG="$KDIR/vmlinux"
                      CONSOLE="ttyS0" ;;
             powerpc) QEMU="qemu-system-ppc64 -M pseries"
