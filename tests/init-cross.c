@@ -39,6 +39,7 @@ static void wr(const char *fmt, ...)
 	char buf[1024];
 	va_list ap;
 	int n;
+	ssize_t w;
 
 	va_start(ap, fmt);
 	n = vsnprintf(buf, sizeof(buf), fmt, ap);
@@ -47,7 +48,8 @@ static void wr(const char *fmt, ...)
 		return;
 	if (n > (int)sizeof(buf))
 		n = sizeof(buf);
-	write(1, buf, n);
+	w = write(1, buf, n);
+	(void)w;
 }
 
 static int load_module(const char *path, const char *name)
@@ -88,7 +90,7 @@ int main(void)
 		wr("RESULT: FAIL (mod_hunter failed to load)\n");
 		wr("RUNTIME-RESULT: FAIL\n");
 		sync();
-		reboot(LINUX_REBOOT_CMD_POWER_OFF);
+		reboot(RB_POWER_OFF);
 		return 1;
 	}
 
@@ -100,7 +102,7 @@ int main(void)
 		   strerror(errno));
 		wr("RUNTIME-RESULT: FAIL\n");
 		sync();
-		reboot(LINUX_REBOOT_CMD_POWER_OFF);
+		reboot(RB_POWER_OFF);
 		return 1;
 	}
 	while (off < (ssize_t)sizeof(buf)) {
@@ -116,7 +118,10 @@ int main(void)
 		off += n;
 	}
 	close(fd);
-	write(1, buf, off);
+	{
+		ssize_t w = write(1, buf, off);
+		(void)w;
+	}
 
 	/* mod_hunter verdicts: [CRITICAL]=hidden from list+kset,
 	 * [HIGH]=in kset but missing from the module list (unlinked = hidden).
@@ -136,7 +141,7 @@ int main(void)
 	wr("RUNTIME-RESULT: %s\n", found ? "PASS" : "FAIL");
 
 	sync();
-	reboot(LINUX_REBOOT_CMD_POWER_OFF);
+	reboot(RB_POWER_OFF);
 	/* reboot() returns only on failure; make the kernel panic via panic=
 	 * so the VM still terminates instead of sitting at a dead shell. */
 	return found ? 0 : 1;
