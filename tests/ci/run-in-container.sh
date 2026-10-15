@@ -8,12 +8,13 @@
 #      an initramfs, boot a QEMU VM and run the detection test, with console
 #      output saved to /src/vm-console.log
 #
-# Usage: run-in-container.sh <kernel-version> <arch x86_64|aarch64> <runtime: true|false>
+# Usage: run-in-container.sh <kernel-version> <arch> <runtime: true|false> [qarch]
 set -uo pipefail
 
 KVER="$1"
 ARCH="$2"
 RUNTIME="$3"
+QARCH="${4:-}"
 
 echo "===== [1/4] Installing dependencies (container era image) ====="
 if command -v apt-get >/dev/null 2>&1; then
@@ -32,9 +33,24 @@ if command -v apt-get >/dev/null 2>&1; then
     if [ "$ARCH" = "x86_64" ] && [ "$RUNTIME" = "true" ]; then
         PKGS="$PKGS qemu-system-x86 busybox-static"
     fi
-    if [ "$ARCH" = "aarch64" ]; then
-        PKGS="$PKGS gcc-aarch64-linux-gnu"
-    fi
+    # Cross toolchains (needed for the module build on every cross arch) and,
+    # for runtime jobs, the matching QEMU system emulator.  Ubuntu package
+    # contents: qemu-system-arm ships qemu-system-arm + qemu-system-aarch64,
+    # qemu-system-mips ships qemu-system-mips{,64,el,64el},
+    # qemu-system-ppc ships qemu-system-ppc{,64}, qemu-system-misc ships
+    # qemu-system-riscv64 (Ubuntu 24.04, QEMU 8.2).
+    case "$ARCH" in
+        aarch64) PKGS="$PKGS gcc-aarch64-linux-gnu"
+                 [ "$RUNTIME" = "true" ] && PKGS="$PKGS qemu-system-arm" ;;
+        armv7)   PKGS="$PKGS gcc-arm-linux-gnueabihf"
+                 [ "$RUNTIME" = "true" ] && PKGS="$PKGS qemu-system-arm" ;;
+        mips)    PKGS="$PKGS gcc-mips64-linux-gnuabi64"
+                 [ "$RUNTIME" = "true" ] && PKGS="$PKGS qemu-system-mips" ;;
+        powerpc) PKGS="$PKGS gcc-powerpc64-linux-gnu"
+                 [ "$RUNTIME" = "true" ] && PKGS="$PKGS qemu-system-ppc" ;;
+        riscv)   PKGS="$PKGS gcc-riscv64-linux-gnu"
+                 [ "$RUNTIME" = "true" ] && PKGS="$PKGS qemu-system-misc" ;;
+    esac
     DEBIAN_FRONTEND=noninteractive apt-get install -y $PKGS
 else
     # CentOS 7: official mirrors are gone, switch to vault
@@ -64,8 +80,13 @@ bash /src/tests/ci/build-kernel.sh "$KVER" "$ARCH" || {
 KDIR="/build/linux-${KVER}"
 
 case "$ARCH" in
-    x86_64)  KARCH=x86;  CROSS="" ;;
-    aarch64) KARCH=arm64; CROSS="aarch64-linux-gnu-" ;;
+    x86_64)  KARCH=x86;     CROSS="" ;;
+    aarch64) KARCH=arm64;   CROSS="aarch64-linux-gnu-" ;;
+    armv7)   KARCH=arm;     CROSS="arm-linux-gnueabihf-" ;;
+    mips)    KARCH=mips;    CROSS="mips64-linux-gnuabi64-" ;;
+    powerpc) KARCH=powerpc; CROSS="powerpc64-linux-gnu-" ;;
+    riscv)   KARCH=riscv;   CROSS="riscv64-linux-gnu-" ;;
+    *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
 echo "===== [3/4] Compiling ALIRT modules (src/ layout) ====="
@@ -95,22 +116,67 @@ if [ "$RUNTIME" = "true" ]; then
 
     # Assemble the initramfs
     R=/ir-root
-    mkdir -p "$R/bin" "$R/ko" "$R/proc" "$R/sys"
-    cp /bin/busybox "$R/bin/"
+    rm -rf "$R" /ir.cpio.gz
+    mkdir -p "$R/ko" "$R/proc" "$R/sys"
     cp /src/src/mod_hunter/mod_hunter.ko /src/tests/samples/hide_self.ko "$R/ko/"
-    cp /src/tests/init "$R/init"
-    chmod +x "$R/init"
-    ( cd "$R" && find . -print0 | cpio --null -o -H newc --quiet | gzip -9 ) > /ir.cpio.gz
 
-    KVM=""
-    [ -w /dev/kvm ] && KVM="-enable-kvm"
-    # CentOS 7 ships the emulator as /usr/libexec/qemu-kvm
-    QEMU_BIN="$(command -v qemu-system-x86_64 || echo /usr/libexec/qemu-kvm)"
-    timeout 300 "$QEMU_BIN" $KVM -m 512M -smp 2 \
-        -kernel "$KDIR/arch/x86/boot/bzImage" \
-        -initrd /ir.cpio.gz \
-        -append "console=ttyS0,115200 loglevel=8 panic=10" \
-        -nographic -no-reboot 2>&1 | tee /src/vm-console.log
+    if [ "$ARCH" = "x86_64" ]; then
+        # x86_64 keeps the proven busybox initramfs path
+        mkdir -p "$R/bin"
+        cp /bin/busybox "$R/bin/"
+        cp /src/tests/init "$R/init"
+        chmod +x "$R/init"
+        ( cd "$R" && find . -print0 | cpio --null -o -H newc --quiet | gzip -9 ) > /ir.cpio.gz
+
+        KVM=""
+        [ -w /dev/kvm ] && KVM="-enable-kvm"
+        # CentOS 7 ships the emulator as /usr/libexec/qemu-kvm
+        QEMU_BIN="$(command -v qemu-system-x86_64 || echo /usr/libexec/qemu-kvm)"
+        timeout 300 "$QEMU_BIN" $KVM -m 512M -smp 2 \
+            -kernel "$KDIR/arch/x86/boot/bzImage" \
+            -initrd /ir.cpio.gz \
+            -append "console=ttyS0,115200 loglevel=8 panic=10" \
+            -nographic -no-reboot 2>&1 | tee /src/vm-console.log
+    else
+        # Cross-arch path: static, pure-syscall init (tests/init-cross.c),
+        # so no per-arch busybox is required.  QEMU machine/console choices:
+        #   aarch64 : virt + cortex-a57, PL011 serial -> ttyAMA0
+        #   armv7   : virt + cortex-a15, PL011 serial -> ttyAMA0
+        #   mips    : Malta in qemu-system-mips64 (64-bit BE kernel from
+        #             mips64_defconfig), 8250 serial -> ttyS0
+        #   powerpc : pSeries, hypervisor console -> hvc0
+        #   riscv   : virt (OpenSBI bundled with QEMU boots the Image), 8250 -> ttyS0
+        "${CROSS}gcc" -O2 -static -Wall -o "$R/init" /src/tests/init-cross.c \
+            || { echo "RUNTIME-RESULT: FAIL (init build)"; exit 1; }
+        ( cd "$R" && find . -print0 | cpio --null -o -H newc --quiet | gzip -9 ) > /ir.cpio.gz
+
+        case "${QARCH:-$ARCH}" in
+            aarch64) QEMU="qemu-system-aarch64 -M virt -cpu cortex-a57"
+                     KIMG="$KDIR/arch/arm64/boot/Image"
+                     CONSOLE="ttyAMA0" ;;
+            armv7)   QEMU="qemu-system-arm -M virt -cpu cortex-a15"
+                     KIMG="$KDIR/arch/arm/boot/zImage"
+                     CONSOLE="ttyAMA0" ;;
+            mips)    QEMU="qemu-system-mips64 -M malta"
+                     KIMG="$KDIR/vmlinux"
+                     CONSOLE="ttyS0" ;;
+            powerpc) QEMU="qemu-system-ppc64 -M pseries"
+                     KIMG="$KDIR/arch/powerpc/boot/zImage"
+                     CONSOLE="hvc0" ;;
+            riscv)   QEMU="qemu-system-riscv64 -M virt"
+                     KIMG="$KDIR/arch/riscv/boot/Image"
+                     CONSOLE="ttyS0" ;;
+            *) echo "RUNTIME-RESULT: FAIL (no QEMU mapping for $ARCH)"; exit 1 ;;
+        esac
+        # TCG emulation is slow (a full defconfig kernel under emulation):
+        # allow 7 minutes for boot + module load + scan.
+        # shellcheck disable=SC2086
+        timeout 420 $QEMU -m 1G \
+            -kernel "$KIMG" \
+            -initrd /ir.cpio.gz \
+            -append "console=$CONSOLE,115200 loglevel=8 panic=10" \
+            -nographic -no-reboot 2>&1 | tee /src/vm-console.log
+    fi
 
     if grep -q "RESULT: PASS" /src/vm-console.log; then
         echo "RUNTIME-RESULT: PASS"

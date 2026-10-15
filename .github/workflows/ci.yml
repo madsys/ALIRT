@@ -8,7 +8,7 @@ on:
 
 jobs:
   matrix-test:
-    name: "${{ matrix.kver }} / ${{ matrix.arch }}"
+    name: "${{ matrix.kver }} / ${{ matrix.arch }}${{ matrix.tag }}"
     runs-on: ubuntu-latest
     continue-on-error: true
     strategy:
@@ -28,6 +28,11 @@ jobs:
           - { kver: "7.2.10",   image: "ubuntu:24.04", arch: "x86_64",  runtime: true }
           - { kver: "5.15.180", image: "ubuntu:22.04", arch: "aarch64", runtime: false }
           - { kver: "6.12.35",  image: "ubuntu:24.04", arch: "aarch64", runtime: false }
+          # Cross-architecture QEMU runtime jobs (staged rollout): qarch
+          # selects the QEMU emulator/mapping used by run-in-container.sh;
+          # tag distinguishes these runtime jobs from the compile-only
+          # aarch64 entries above in artifacts and job names.
+          - { kver: "6.12.35",  image: "ubuntu:24.04", arch: "aarch64", runtime: true, qarch: "aarch64", tag: "-rt" }
 
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +41,7 @@ jobs:
         run: |
           docker run --rm -v "$GITHUB_WORKSPACE:/src" -w /src \
             "${{ matrix.image }}" bash /src/tests/ci/run-in-container.sh \
-            "${{ matrix.kver }}" "${{ matrix.arch }}" "${{ matrix.runtime }}"
+            "${{ matrix.kver }}" "${{ matrix.arch }}" "${{ matrix.runtime }}" "${{ matrix.qarch }}"
 
       - name: Record test result for this matrix combination
         if: always()
@@ -47,13 +52,13 @@ jobs:
           grep -q "RUNTIME-RESULT: PASS" vm-console.log 2>/dev/null && RUNTIME=pass
           grep -q "RUNTIME-RESULT: FAIL" vm-console.log 2>/dev/null && RUNTIME=fail
           echo "| ${{ matrix.kver }} | ${{ matrix.arch }} | $COMPILE | $RUNTIME |" \
-            > "status/${{ matrix.kver }}-${{ matrix.arch }}.md"
-          cat "status/${{ matrix.kver }}-${{ matrix.arch }}.md"
+            > "status/${{ matrix.kver }}-${{ matrix.arch }}${{ matrix.tag }}.md"
+          cat "status/${{ matrix.kver }}-${{ matrix.arch }}${{ matrix.tag }}.md"
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: "status-${{ matrix.kver }}-${{ matrix.arch }}"
+          name: "status-${{ matrix.kver }}-${{ matrix.arch }}${{ matrix.tag }}"
           path: status/
 
   summary:

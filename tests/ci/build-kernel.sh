@@ -1,15 +1,25 @@
 #!/usr/bin/env bash
 # Build a kernel of the given version from kernel.org sources (defconfig + bzImage + modules).
 # Runs inside the container; build artifacts land in /build/linux-<version>/.
-# Usage: build-kernel.sh <kernel-version> <arch x86_64|aarch64>
+# Usage: build-kernel.sh <kernel-version> <arch>
 set -euo pipefail
 
 KVER="$1"
 ARCH="${2:-x86_64}"
 
+# KARCH: the kernel tree's arch name; CROSS: toolchain prefix;
+# IMG: kernel image target/path; DEFCFG: defconfig to start from.
+# The mips job targets Malta in qemu-system-mips64, so a 64-bit big-endian
+# kernel (mips64_defconfig) is required; the pseries job uses the 64-bit
+# big-endian pseries_defconfig (the le variant of the toolchain would need
+# a CONFIG_CPU_LITTLE_ENDIAN flip, BE keeps the defconfig untouched).
 case "$ARCH" in
-    x86_64)  KARCH=x86;   CROSS="";        IMG=bzImage ;;
-    aarch64) KARCH=arm64; CROSS="aarch64-linux-gnu-"; IMG=Image ;;
+    x86_64)  KARCH=x86;     CROSS="";                       IMG=bzImage; DEFCFG=defconfig ;;
+    aarch64) KARCH=arm64;   CROSS="aarch64-linux-gnu-";     IMG=Image;   DEFCFG=defconfig ;;
+    armv7)   KARCH=arm;     CROSS="arm-linux-gnueabihf-";   IMG=zImage;  DEFCFG=multi_v7_defconfig ;;
+    mips)    KARCH=mips;    CROSS="mips64-linux-gnuabi64-"; IMG=vmlinux; DEFCFG=mips64_defconfig ;;
+    powerpc) KARCH=powerpc; CROSS="powerpc64-linux-gnu-";   IMG=zImage;  DEFCFG=pseries_defconfig ;;
+    riscv)   KARCH=riscv;   CROSS="riscv64-linux-gnu-";     IMG=Image;   DEFCFG=defconfig ;;
     *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
@@ -20,10 +30,13 @@ echo "Downloading linux-${KVER} ..."
 curl -fsSL "https://cdn.kernel.org/pub/linux/kernel/v${KVER%%.*}.x/linux-${KVER}.tar.xz" | tar xJ
 
 cd "linux-${KVER}"
-make ARCH="$KARCH" CROSS_COMPILE="$CROSS" defconfig >/dev/null
+make ARCH="$KARCH" CROSS_COMPILE="$CROSS" "$DEFCFG" >/dev/null
 # ALIRT resolves 'modules', 'module_kset' and 'init_mm' from kallsyms at
 # module-load time; without CONFIG_KALLSYMS_ALL these data symbols are not
 # in the kallsyms table and every cross-check degrades to "disabled".
+# scripts/config + olddefconfig enables the option on every architecture;
+# if an arch does not define the symbol, olddefconfig silently drops the
+# orphan line and the build proceeds.
 ./scripts/config --enable KALLSYMS_ALL
 make ARCH="$KARCH" CROSS_COMPILE="$CROSS" olddefconfig >/dev/null
 # Note: the kernel image target differs per arch (x86=bzImage, arm64=Image, riscv=Image)
