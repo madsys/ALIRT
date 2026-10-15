@@ -100,17 +100,26 @@ esac
 # regardless of the sizes of the sections before it.
 # (GCC has no -falign-variables; objcopy --set-section-alignment needs
 # binutils >= 2.39, which every cross container here ships.  x86_64/riscv/
-# powerpc/mips layouts are already 16-aligned and are left untouched.)
+# and mips layouts are already 16-aligned and are left untouched.)
+#
+# The section is located through the __this_module SYMBOL (objdump -t)
+# rather than by hard-coding a name: modpost always emits the symbol, and
+# the section name varies with kernel/binutils combinations (the naive
+# readelf -S name grep missed on powerpc even though the loader - which
+# resolves the same section by name - loads the module fine).
 align_modstruct() {
     ko="$1"
-    for sec in .gnu.linkonce.this_module __this_module; do
-        if ${CROSS}readelf -S "$ko" | grep -qE " ${sec}[[:space:]]"; then
-            ${CROSS}objcopy --set-section-alignment "$sec=16" "$ko" \
-                || echo "WARN: could not align $sec in $ko"
+    sec=$(${CROSS}objdump -t "$ko" 2>/dev/null | awk '$NF == "__this_module" && NF >= 5 {print $(NF-2); exit}')
+    case "$sec" in
+        ""|UND|UNDEF|ABS)
+            echo "WARN: __this_module symbol/section not found in $ko"
+            echo "WARN:   module-ish sections: $(${CROSS}readelf -S "$ko" 2>/dev/null | grep -iE 'this_module|modul' | tr -s ' ' | head -5)"
+            echo "WARN:   symbol: $(${CROSS}objdump -t "$ko" 2>/dev/null | grep this_module | head -2)"
             return
-        fi
-    done
-    echo "WARN: no this_module section in $ko"
+            ;;
+    esac
+    ${CROSS}objcopy --set-section-alignment "$sec=16" "$ko" \
+        || echo "WARN: could not align $sec in $ko"
 }
 
 NEED_ALIGN=no
