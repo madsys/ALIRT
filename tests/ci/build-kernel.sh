@@ -9,15 +9,18 @@ ARCH="${2:-x86_64}"
 
 # KARCH: the kernel tree's arch name; CROSS: toolchain prefix;
 # IMG: kernel image target/path; DEFCFG: defconfig to start from.
-# The mips job targets Malta in qemu-system-mips64, so a 64-bit big-endian
-# kernel (mips64_defconfig) is required; the pseries job uses the 64-bit
-# big-endian pseries_defconfig (the le variant of the toolchain would need
-# a CONFIG_CPU_LITTLE_ENDIAN flip, BE keeps the defconfig untouched).
+# The mips job boots Malta in qemu-system-mips64; mips64_defconfig was
+# removed from the kernel tree, so use malta_defconfig (32-bit BE): the
+# 64-bit Malta CPU in QEMU runs o32 kernels fine, and the 32-bit
+# mips-linux-gnu toolchain matches the kernel ABI for module builds.
+# The pseries job uses the 64-bit big-endian pseries_defconfig (the le
+# variant of the toolchain would need a CONFIG_CPU_LITTLE_ENDIAN flip,
+# BE keeps the defconfig untouched).
 case "$ARCH" in
     x86_64)  KARCH=x86;     CROSS="";                       IMG=bzImage; DEFCFG=defconfig ;;
     aarch64) KARCH=arm64;   CROSS="aarch64-linux-gnu-";     IMG=Image;   DEFCFG=defconfig ;;
     armv7)   KARCH=arm;     CROSS="arm-linux-gnueabihf-";   IMG=zImage;  DEFCFG=multi_v7_defconfig ;;
-    mips)    KARCH=mips;    CROSS="mips64-linux-gnuabi64-"; IMG=vmlinux; DEFCFG=mips64_defconfig ;;
+    mips)    KARCH=mips;    CROSS="mips-linux-gnu-";        IMG=vmlinux; DEFCFG=malta_defconfig ;;
     powerpc) KARCH=powerpc; CROSS="powerpc64-linux-gnu-";   IMG=zImage;  DEFCFG=pseries_defconfig ;;
     riscv)   KARCH=riscv;   CROSS="riscv64-linux-gnu-";     IMG=Image;   DEFCFG=defconfig ;;
     *) echo "Unsupported architecture: $ARCH"; exit 1 ;;

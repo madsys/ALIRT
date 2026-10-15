@@ -44,7 +44,7 @@ if command -v apt-get >/dev/null 2>&1; then
                  [ "$RUNTIME" = "true" ] && PKGS="$PKGS qemu-system-arm" ;;
         armv7)   PKGS="$PKGS gcc-arm-linux-gnueabihf"
                  [ "$RUNTIME" = "true" ] && PKGS="$PKGS qemu-system-arm" ;;
-        mips)    PKGS="$PKGS gcc-mips64-linux-gnuabi64"
+        mips)    PKGS="$PKGS gcc-mips-linux-gnu"
                  [ "$RUNTIME" = "true" ] && PKGS="$PKGS qemu-system-mips" ;;
         powerpc) PKGS="$PKGS gcc-powerpc64-linux-gnu"
                  [ "$RUNTIME" = "true" ] && PKGS="$PKGS qemu-system-ppc" ;;
@@ -142,8 +142,9 @@ if [ "$RUNTIME" = "true" ]; then
         # so no per-arch busybox is required.  QEMU machine/console choices:
         #   aarch64 : virt + cortex-a57, PL011 serial -> ttyAMA0
         #   armv7   : virt + cortex-a15, PL011 serial -> ttyAMA0
-        #   mips    : Malta in qemu-system-mips64 (64-bit BE kernel from
-        #             mips64_defconfig), 8250 serial -> ttyS0
+        #   mips    : Malta in qemu-system-mips64 (32-bit BE o32 kernel from
+        #             malta_defconfig; the 64-bit Malta CPU runs o32 fine),
+        #             8250 serial -> ttyS0
         #   powerpc : pSeries, hypervisor console -> hvc0
         #   riscv   : virt (OpenSBI bundled with QEMU boots the Image), 8250 -> ttyS0
         "${CROSS}gcc" -O2 -static -Wall -o "$R/init" /src/tests/init-cross.c \
