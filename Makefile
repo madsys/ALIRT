@@ -1,4 +1,4 @@
-# ALIRT top-level Makefile (v0.5.2)
+# ALIRT top-level Makefile (v0.6.0)
 # Sources live in src/<tool>/; this file only dispatches the builds.
 # Usage:
 #   make                        build all four kernel modules (native)

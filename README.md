@@ -1,6 +1,6 @@
 # ALIRT — Advanced Linux Incident Response Tool
 
-**Developed and maintained by madsys, coolq — v0.5.2**
+**Developed and maintained by madsys, coolq — v0.6.0**
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
@@ -134,9 +134,15 @@ $ src/mod_dumper/dismod.sh dump.dat        # or: src/mod_dumper/dismod.pl
 ## What platforms it support now?
 
 - **x86_64**: kernel 3.10 — 7.2 (CI-verified matrix); 2.6.32+ covered by
-  version conditionals. Other architectures (arm64, armv7, mips, powerpc,
-  riscv) are stubbed in `src/arch/` — they compile and load with a clear
-  "not yet supported" message.
+  version conditionals.
+- **armv7, aarch64 (ARM64), mips (o32), powerpc (ppc64le/ppc64), riscv
+  (rv64)**: real page-table walkers in `src/arch/<arch>/alirt_mm.h`;
+  mod_hunter / process_hunter compile and run on these architectures,
+  verified by the CI QEMU runtime matrix (see below).
+- Cross-compilation: `make ARCH=<platform> KDIR=/path/to/kernel/tree`,
+  where `<platform>` is one of `x86_64, armv7, aarch64, mips, powerpc,
+  riscv` (override the toolchain prefix with `CROSS_COMPILE=<prefix>-`;
+  run `make help` for the full list of defaults).
 - Every push is compile-tested and runtime-tested (hidden-module detection
   against a self-hiding sample in QEMU) across the kernel matrix — see
   `.github/workflows/ci.yml` and the compatibility matrix in the latest
@@ -162,7 +168,17 @@ that kernel.
 | 6.18.56 (longterm) | ✅ build + runtime detection |
 | 7.2.10 | ✅ build + runtime detection |
 
-**aarch64 — cross-compiled (no runtime test yet):** 5.15.180, 6.12.35
+**Cross-architecture — build + QEMU runtime detection (hidden-module test):**
+
+| Architecture | 6.12.35 | 6.18.56 | 7.2.10 |
+|---|---|---|---|
+| aarch64 (ARM64) | ✅ | ✅ | ✅ |
+| armv7 (32-bit ARM, LPAE) | ✅ | ✅ | ✅ |
+| mips (o32, little-endian Malta) | ✅ | ✅ | ✅ |
+| powerpc (ppc64le) | ✅ | ✅ | ✅ |
+| riscv (rv64) | ✅ | ✅ | ✅ |
+
+**aarch64 — additional cross-builds (compile only):** 5.15.180
 
 The live, always-current version of this table is the compatibility
 matrix in the latest [CI run summary](https://github.com/madsys/ALIRT/actions/workflows/ci.yml).

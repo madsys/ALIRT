@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 /*
- * modumper.c - ALIRT kernel module dumper (v0.5.2)
+ * modumper.c - ALIRT kernel module dumper (v0.6.0)
  *
  * Dumps the in-memory core image of a loaded kernel module for
  * offline analysis (disassembly with dismod.sh, comparison against
@@ -66,7 +66,7 @@
 
 #include "compat.h"
 
-#define MD_VERSION		"0.5.2"
+#define MD_VERSION		"0.6.0"
 #define MD_PROC_NAME		"get_mod"	/* keep the original name */
 #define MD_PROC_MODE		(S_IRUSR | S_IRGRP | S_IROTH)
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 /*
- * mod_hunter.c - ALIRT hidden kernel module hunter (v0.5.2)
+ * mod_hunter.c - ALIRT hidden kernel module hunter (v0.6.0)
  *
  * Brute-force scanner for struct module objects in the module mapping
  * space, with three-way cross-validation against the kernel's own
@@ -76,7 +76,7 @@
 #error "ALIRT: unsupported architecture (supported: x86_64, arm64, armv7, mips, powerpc, riscv)"
 #endif
 
-#define MH_VERSION		"0.5.2"
+#define MH_VERSION		"0.6.0"
 
 #define MH_PROC_NAME		"showmodules"	/* keep the original name */
 #define MH_PROC_MODE		(S_IRUSR | S_IWUSR)

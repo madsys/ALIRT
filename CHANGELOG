@@ -1,4 +1,25 @@
 26.10.15
+	ALIRT-0.6.0 multi-architecture release.
+	- mod_hunter / process_hunter: real page-table walkers for armv7
+	  (classic 2-level + LPAE), aarch64 (4K/16K pages, 3-5 levels,
+	  folded-level aware), mips (o32), powerpc (ppc64 ELFv2, hash/radix
+	  via init_mm) and riscv (sv39/sv48, 2GB low-window fallback for
+	  4.19-5.12); arch header auto-selected from the target kernel's
+	  CONFIG_*; build: make ARCH=<platform> [CROSS_COMPILE=] [KDIR=].
+	- compat: ppc64 ELFv2 global-entry resolution of
+	  kallsyms_lookup_name (KPROBES-based, exact prologue match).
+	- mod_hunter: scan window anchored on THIS_MODULE on arm64
+	  (KASLR-randomized module region); VMALLOC_START gate defused on
+	  non-x86 architectures (addr_valid remains the authority).
+	- CI: QEMU runtime detection matrix extended to 5 architectures
+	  (aarch64, armv7, mips, powerpc, riscv) on kernels 6.12.35 /
+	  6.18.56 / 7.2.10 — 28 matrix jobs, all green; per-arch QEMU
+	  launch parameters and a pure-syscall static init (tests/init-cross.c)
+	  replace the per-arch busybox rootfs.
+	- Tests: hide_self sample now erases its list pointers Diamorphine-
+	  style (real rootkit shape).
+
+26.10.15
 	ALIRT-0.5.2 LTS coverage release.
 	- CI: added the longterm kernel 6.18 and the stable kernel 7.2 to
 	  the build + QEMU runtime detection matrix (x86_64): 3.10, 4.4,

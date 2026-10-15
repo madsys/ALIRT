@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 /*
- * sock_hunter.c - ALIRT hidden socket hunter (v0.5.2)
+ * sock_hunter.c - ALIRT hidden socket hunter (v0.6.0)
  *
  * Passive enumerator of struct sock objects straight out of the SLUB
  * caches that back the TCP/UDP/RAW protocol families ("TCP", "UDP",
@@ -99,7 +99,7 @@ static int sh_resolve_kallsyms(void)
 	return alirt_resolve_kln(&sh_lookup_name);
 }
 
-#define SH_VERSION		"0.5.2"
+#define SH_VERSION		"0.6.0"
 
 #define SH_PROC_NAME		"showsocks"	/* keep the original name */
 #define SH_PROC_MODE		S_IRUSR
