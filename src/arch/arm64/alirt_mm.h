@@ -87,6 +87,7 @@
 #include <linux/sched.h>
 #include <linux/version.h>
 #include <linux/errno.h>
+#include <linux/module.h>	/* THIS_MODULE (module-layout anchor below) */
 
 #include <asm/pgtable.h>	/* p?d_offset / p?d_none / pte_present / *_TYPE_* */
 #include <asm/memory.h>		/* MODULES_VADDR / MODULES_END (all versions) */
@@ -257,27 +258,51 @@ end:
 	return alirt_addr_valid(end_addr + 1, size - (end_addr - addr + 1));
 }
 
-/* arm64 module mapping space.  MODULES_VADDR / MODULES_END are defined
- * in asm/memory.h on every version (their values moved across releases:
- * below PAGE_OFFSET with a 64M window on 3.7-4.4, a 128M window after
- * the KASAN shadow on 4.9-4.19 / after the BPF JIT region on 5.4, and a
- * _PAGE_END(VA_BITS_MIN)-anchored 128M (5.15-6.1) or 2G (6.6+) window) —
- * the macros always track the real layout, so no version conditionals
- * are needed here. */
+/* arm64 module mapping space.
+ *
+ * MODULES_VADDR / MODULES_END are defined in asm/memory.h on every
+ * version, but since the module_alloc() randomization era (the
+ * module_direct_base/module_plt_base bounding boxes, arch/arm64
+ * 4.6-6.8 kernel/module.c, arch/arm64/mm/init.c execmem setup 6.9+)
+ * they no longer describe where modules actually land: with KASLR the
+ * kernel image sits at KIMAGE_VADDR + offset inside a 2G range, and
+ * modules are first-fit allocated from a per-boot randomized bounding
+ * box containing the image (a 128M direct-branch box, or the full 2G
+ * PLT box when CONFIG_RANDOMIZE_MODULE_REGION_FULL=y — which
+ * defconfig enables, printing "2G module region forced by
+ * RANDOMIZE_MODULE_REGION_FULL" at boot).  That box can lie entirely
+ * ABOVE MODULES_END (observed in CI: 0 candidates on the 6.12/6.18/7.2
+ * runtime jobs even though the scanned window exactly matched the
+ * compile-time [MODULES_VADDR, MODULES_END) range and the candidate
+ * gate was fixed), so a scanner limited to the fixed window is blind
+ * on every randomized boot.
+ *
+ * mod_hunter itself is a module allocated from the same execmem/vmalloc
+ * range, and mod_hunter.c's MH_SCAN_HARD_CAP (2G / MH_SCAN_STEP steps)
+ * cannot cover the whole 4G+ span the box can occupy anyway.  Anchor
+ * the window on our own struct module instead: [THIS_MODULE - 1G,
+ * THIS_MODULE + 1G) always contains every module co-allocated with us
+ * (first-fit allocations are adjacent — the CI loads hide_self right
+ * before mod_hunter), and covers half of the randomized box in the
+ * worst case.  THIS_MODULE is NULL only for built-in code, which
+ * mod_hunter never is; fall back to the fixed window defensively.
+ */
 static inline unsigned long alirt_modules_start(void)
 {
-	return MODULES_VADDR;
+	unsigned long tm = (unsigned long)THIS_MODULE;
+	return tm ? tm - (1UL << 30) : MODULES_VADDR;
 }
 
 static inline unsigned long alirt_modules_end(void)
 {
-	return MODULES_END;
+	unsigned long tm = (unsigned long)THIS_MODULE;
+	return tm ? tm + (1UL << 30) : MODULES_END;
 }
 
 static inline bool alirt_is_module_space(const void *p)
 {
-	return (unsigned long)p >= MODULES_VADDR &&
-	       (unsigned long)p < MODULES_END;
+	return (unsigned long)p >= alirt_modules_start() &&
+	       (unsigned long)p < alirt_modules_end();
 }
 
 /*
