@@ -1,4 +1,4 @@
-# ALIRT — Advanced Linux Incident Response Tool
+# ALIRT — Advanced Linux Incident Response Toolkit
 
 **Developed and maintained by madsys, coolq — v0.6.0**
 
