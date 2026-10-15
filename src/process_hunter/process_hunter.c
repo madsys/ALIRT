@@ -52,9 +52,9 @@
  *     memcg_cache_params layouts.  From 5.9 on per-memcg caches were
  *     removed upstream, so only the root cache exists anyway.
  *
- * Supported: x86_64, Linux 2.6.32 - 6.12+, CONFIG_SLUB.  Any other
- * combination fails module load with -ENODEV (or does not compile),
- * never panics.
+ * Supported: x86_64, arm64, armv7, mips, powerpc, riscv on
+ * Linux 2.6.32 - 6.12+, CONFIG_SLUB.  Any other combination fails at
+ * compile time (#error) or at module load with -ENODEV, never panics.
  *
  * Copyright (C) 2005 madsys, 2025 ALIRT
  */
@@ -87,7 +87,8 @@
 
 #include "compat.h"
 
-#if defined(CONFIG_X86_64)
+#if defined(CONFIG_X86_64) || defined(CONFIG_ARM64) || defined(CONFIG_ARM) || \
+	defined(CONFIG_MIPS) || defined(CONFIG_PPC) || defined(CONFIG_RISCV)
 /*
  * init_mm is resolved through kallsyms by alirt_mm_init() at module
  * init (it is not exported on any supported kernel; see alirt_mm.h).
@@ -96,6 +97,8 @@
  */
 #include "alirt_mm.h"
 #define PH_HAVE_MM 1
+#else
+#error "ALIRT: unsupported architecture (supported: x86_64, arm64, armv7, mips, powerpc, riscv)"
 #endif
 
 /*
@@ -1162,7 +1165,8 @@ static void __exit ph_exit(void)
 static int __init ph_init(void)
 {
 	pr_err("process_hunter: unsupported architecture "
-	       "(x86_64 only for now), refusing to load\n");
+	       "(supported: x86_64, arm64, armv7, mips, powerpc, riscv), "
+	       "refusing to load\n");
 	return -ENODEV;
 }
 

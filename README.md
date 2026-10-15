@@ -6,7 +6,7 @@
 
 ALIRT (Advanced Linux incident response toolkit, formerly known as **AIRT**) is a
 Linux-based tool suit for incident response, specifically designed to detect
-kernel rootkit on the Linux box. 
+kernel rootkit on the Linux box.
 Compared to other kernel-based malware detection systems, ALIRT occupies a 
 unique position: 
 1. No signatures required; complements signature-based tools (such as the rkhunter family);

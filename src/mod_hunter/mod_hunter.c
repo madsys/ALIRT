@@ -35,13 +35,16 @@
  *     and defers the recovery decision to the analyst (dump with the
  *     ALIRT modumper tool and decide by hand);
  *   - compatibility layer compat.h + arch layer alirt_mm.h covering
- *     Linux 2.6.32 - 6.12+ on x86_64.  "modules" / "module_kset" are
+ *     Linux 2.6.32 - 6.12+ on x86_64, arm64, armv7, mips, powerpc and
+ *     riscv (real page-table walkers in src/arch/<arch>/alirt_mm.h).
+ *     "modules" / "module_kset" are
  *     resolved through kallsyms at load (neither is exported), with
  *     graceful degradation of the cross-check when they are missing
  *     from the symbol table.
  *
- * Supported: x86_64, Linux 2.6.32 - 6.12+. Any other combination
- * fails module load with -ENODEV, never panics.
+ * Supported: x86_64, arm64, armv7, mips, powerpc, riscv on
+ * Linux 2.6.32 - 6.12+. Any other combination fails at compile time
+ * (#error) or at module load with -ENODEV, never panics.
  *
  * Copyright (C) 2005 madsys, 2024 g1inko (ksen-lin), 2025 ALIRT
  */
@@ -65,9 +68,12 @@
 
 #include "compat.h"
 
-#if defined(CONFIG_X86_64)
+#if defined(CONFIG_X86_64) || defined(CONFIG_ARM64) || defined(CONFIG_ARM) || \
+	defined(CONFIG_MIPS) || defined(CONFIG_PPC) || defined(CONFIG_RISCV)
 #include "alirt_mm.h"
 #define MH_HAVE_MODULE_SPACE 1
+#else
+#error "ALIRT: unsupported architecture (supported: x86_64, arm64, armv7, mips, powerpc, riscv)"
 #endif
 
 #define MH_VERSION		"0.5.2"
@@ -776,7 +782,8 @@ static void __exit mh_exit(void)
 static int __init mh_init(void)
 {
 	pr_err("mod_hunter: unsupported architecture "
-	       "(x86_64 only for now), refusing to load\n");
+	       "(supported: x86_64, arm64, armv7, mips, powerpc, riscv), "
+	       "refusing to load\n");
 	return -ENODEV;
 }
 
