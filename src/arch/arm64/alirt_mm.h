@@ -39,8 +39,14 @@
  *     so no page-size conditionals are needed here.  Note the nop* headers
  *     provide *vacuous* none-tests for the levels they fold away (e.g.
  *     pgd_none() = { return 0; } in pgtable-nopud.h); the real entry check
- *     then happens one step down, on the same underlying entry.  The top
- *     level is therefore checked on the raw pgd_val instead of pgd_none().
+ *     then happens one step down, on the same underlying entry.
+ *     Top-level checking is folding-aware (see alirt_addr_valid): on
+ *     2-4-level builds the raw pgd slot IS the top entry, but on 5-level
+ *     builds (4K+VA52) pgd_index() covers bits [51:48] — constant across
+ *     kernel space — so when the tables are runtime-folded (no LVA52) the
+ *     pgd slot is stale and the real top entry is the folded p4d selected
+ *     inside p4d_offset(); the raw pgd value is only tested when
+ *     pgtable_l5_enabled() is true.
  *
  *  4. The p4d level.  arm64 grew a p4d-aware pud_offset() in 5.8
  *     (pud_offset_phys() switched from pgd_page_paddr() to
@@ -203,20 +209,35 @@ static inline bool alirt_addr_valid(unsigned long addr, size_t size)
 	if (unlikely(!alirt_mm_init_mm))
 		return false;
 	pgd = pgd_offset(alirt_mm_init_mm, addr);
-	/* Top-level validity: a zero pgd entry is an invalid descriptor on
-	 * every arm64 version.  Checked on the raw value rather than via
-	 * pgd_none(): for folded-pud configurations the nop* headers define
-	 * pgd_none() as a vacuous { return 0; } (the real test then happens
-	 * one step down at pud_none(), on the same entry), while wherever
-	 * the arch's own pgd_none() exists it is defined as !pgd_val(). */
-	if (unlikely(!pgd) || unlikely(!pgd_val(*pgd)))
+	/* Top-level validity, folding-aware.  A zero entry is an invalid
+	 * descriptor at every arm64 level, but WHICH slot holds the top
+	 * entry depends on the runtime fold state on 5-level builds
+	 * (4K pages + VA52/LPA2, 6.7+): pgd_index() covers bits [51:48],
+	 * which are constant across the whole kernel half of the address
+	 * space, so on hardware without LVA52 (tables folded at runtime)
+	 * it selects a stale slot — the true top entry is the folded p4d
+	 * chosen inside p4d_offset() (pgd_to_folded_p4d, indexed by bits
+	 * [47:39]).  Only test the raw pgd slot when l5 is enabled (or on
+	 * 2-4-level builds, where pgd_index is the true top index and the
+	 * p4d level is compile-time folded into the pgd, making the raw
+	 * pgd value the top entry — the nop* folding the file header note 3
+	 * describes).  The p4d_none() test below then validates the real
+	 * top entry in every configuration. */
+	if (unlikely(!pgd))
 		return false;
+#if ALIRT_PGTABLE_LEVELS > 4
+	if (pgtable_l5_enabled() && unlikely(!pgd_val(*pgd)))
+		return false;
+#else
+	if (unlikely(!pgd_val(*pgd)))
+		return false;
+#endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
 	/* 5.8+ : pud_offset() takes p4d_t *.  p4d_offset()/p4d_none() exist
 	 * for every level count (folded via pgtable-nop4d.h, runtime-fold
 	 * aware on 6.12+); when the p4d level is folded the checks pass
-	 * through to the pgd entry. */
+	 * through to the real top entry selected here. */
 	p4d = p4d_offset(pgd, addr);
 	if (unlikely(!p4d) || unlikely(p4d_none(*p4d)))
 		return false;
