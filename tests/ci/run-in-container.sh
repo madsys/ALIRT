@@ -89,10 +89,20 @@ case "$ARCH" in
     *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
+# arm32/arm64 module layouts can place struct module at offsets that are
+# only 8-byte aligned; the hunter's 0x10 scan step then permanently misses
+# the (real) modules and the runtime test finds nothing.  Force 16-byte
+# alignment of every function/variable so each module's struct module
+# lands on a scanned offset.  (x86_64/riscv/powerpc/mips layouts are
+# already 16-aligned; the flag is a no-op safety net there, so apply it
+# everywhere a runtime module is built.)
+ALIGN16=""
+[ "$RUNTIME" = "true" ] && ALIGN16='KCFLAGS=-falign-functions=16 -falign-variables=16'
+
 echo "===== [3/4] Compiling ALIRT modules (src/ layout) ====="
 COMPILE_OK=1
 for tool in mod_hunter process_hunter sock_hunter; do
-    if make -C "$KDIR" "M=/src/src/$tool" ARCH="$KARCH" CROSS_COMPILE="$CROSS" modules; then
+    if make -C "$KDIR" "M=/src/src/$tool" ARCH="$KARCH" CROSS_COMPILE="$CROSS" $ALIGN16 modules; then
         echo "COMPILE-$tool: PASS"
     else
         echo "COMPILE-$tool: FAIL"
@@ -111,7 +121,7 @@ fi
 if [ "$RUNTIME" = "true" ]; then
     echo "===== [4/4] QEMU runtime detection test ====="
     # Build the self-hiding sample module
-    make -C "$KDIR" M=/src/tests/samples ARCH="$KARCH" CROSS_COMPILE="$CROSS" modules \
+    make -C "$KDIR" M=/src/tests/samples ARCH="$KARCH" CROSS_COMPILE="$CROSS" $ALIGN16 modules \
         || { echo "RUNTIME-RESULT: FAIL (sample build)"; exit 1; }
 
     # Assemble the initramfs
@@ -142,9 +152,10 @@ if [ "$RUNTIME" = "true" ]; then
         # so no per-arch busybox is required.  QEMU machine/console choices:
         #   aarch64 : virt + cortex-a57, PL011 serial -> ttyAMA0
         #   armv7   : virt + cortex-a15, PL011 serial -> ttyAMA0
-        #   mips    : Malta in qemu-system-mips64el (LE o32 malta_defconfig
-        #             kernel; the BE Malta guest is silent under QEMU 8.2
-        #             TCG), 8250 serial -> ttyS0
+        #   mips    : Malta in qemu-system-mipsel (LE o32 malta_defconfig
+        #             kernel; the o32 guest is silent under the 64-bit
+        #             qemu-system-mips64el CPU, and BE Malta under QEMU
+        #             8.2 TCG is silent in either width), 8250 -> ttyS0
         #   powerpc : pSeries, hypervisor console -> hvc0
         #   riscv   : virt (OpenSBI bundled with QEMU boots the Image), 8250 -> ttyS0
         "${CROSS}gcc" -O2 -static -Wall -o "$R/init" /src/tests/init-cross.c \
@@ -158,7 +169,7 @@ if [ "$RUNTIME" = "true" ]; then
             armv7)   QEMU="qemu-system-arm -M virt -cpu cortex-a15"
                      KIMG="$KDIR/arch/arm/boot/zImage"
                      CONSOLE="ttyAMA0" ;;
-            mips)    QEMU="qemu-system-mips64el -M malta"
+            mips)    QEMU="qemu-system-mipsel -M malta"
                      KIMG="$KDIR/vmlinux"
                      CONSOLE="ttyS0"
                      QMEM="-m 512M" ;;

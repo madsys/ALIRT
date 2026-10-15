@@ -70,6 +70,59 @@ static int load_module(const char *path, const char *name)
 	return 0;
 }
 
+/* Diagnostic context: dump /proc/modules and the module-related lines of
+ * /proc/vmallocinfo so the log shows where the kernel actually placed the
+ * modules (the hunter scans a fixed window; a placement outside it or a
+ * struct module at an unscanned alignment shows up here).  Call this only
+ * while the console is quiet: printk output racing these writes garbles
+ * the serial stream, which is why this must run before mod_hunter (whose
+ * report printk floods the console) is loaded. */
+static void dump_modstate(void)
+{
+	static char b[64 * 1024];
+	ssize_t off = 0;
+	int fd;
+
+	fd = open("/proc/modules", O_RDONLY);
+	if (fd >= 0) {
+		while (off < (ssize_t)sizeof(b)) {
+			ssize_t n = read(fd, b + off, sizeof(b) - off);
+
+			if (n <= 0)
+				break;
+			off += n;
+		}
+		close(fd);
+		wr("--- /proc/modules (%zd bytes) ---\n", off);
+		if (write(1, b, off) < 0)
+			return;
+	}
+
+	off = 0;
+	fd = open("/proc/vmallocinfo", O_RDONLY);
+	if (fd < 0)
+		return;
+	while (off < (ssize_t)sizeof(b)) {
+		ssize_t n = read(fd, b + off, sizeof(b) - off);
+
+		if (n <= 0)
+			break;
+		off += n;
+	}
+	close(fd);
+	wr("--- /proc/vmallocinfo (module allocations) ---\n");
+	for (ssize_t i = 0, ls = 0; i < off; i++) {
+		if (b[i] == '\n') {
+			if (memmem(b + ls, i - ls, "module", 6)) {
+				ssize_t w = write(1, b + ls, i - ls + 1);
+
+				(void)w;
+			}
+			ls = i + 1;
+		}
+	}
+}
+
 int main(void)
 {
 	static char buf[256 * 1024];
@@ -85,6 +138,9 @@ int main(void)
 
 	if (load_module("/ko/hide_self.ko", "hide_self") == 0)
 		wr("[TEST] hide_self loaded (unlinked from the module list)\n");
+
+	/* Placement diagnostics while the console is still quiet. */
+	dump_modstate();
 
 	if (load_module("/ko/mod_hunter.ko", "mod_hunter") != 0) {
 		wr("RESULT: FAIL (mod_hunter failed to load)\n");
@@ -121,33 +177,6 @@ int main(void)
 	{
 		ssize_t w = write(1, buf, off);
 		(void)w;
-	}
-
-	/* Diagnostic context: where the kernel actually placed the modules.
-	 * /proc/vmallocinfo lists every vmalloc/module allocation; keep only
-	 * the module-related lines so console noise stays low. */
-	fd = open("/proc/vmallocinfo", O_RDONLY);
-	if (fd >= 0) {
-		static char vb[64 * 1024];
-		ssize_t voff = 0, n;
-
-		while (voff < (ssize_t)sizeof(vb)) {
-			n = read(fd, vb + voff, sizeof(vb) - voff);
-			if (n <= 0)
-				break;
-			voff += n;
-		}
-		close(fd);
-		wr("--- vmallocinfo (module allocations) ---\n");
-		for (ssize_t i = 0, ls = 0; i < voff; i++) {
-			if (vb[i] == '\n') {
-				if (memmem(vb + ls, i - ls, "module", 6)) {
-					ssize_t w2 = write(1, vb + ls, i - ls + 1);
-					(void)w2;
-				}
-				ls = i + 1;
-			}
-		}
 	}
 
 	/* mod_hunter verdicts: [CRITICAL]=hidden from list+kset,
