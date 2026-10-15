@@ -13,7 +13,16 @@
 
 static int __init hide_self_init(void)
 {
-	list_del_init(&THIS_MODULE->list);
+	/* Diamorphine-style hide: unlink, then wipe the list pointers.
+	 * A plain list_del_init() leaves list.next/prev pointing back at
+	 * the module's own allocation, which mod_hunter's looks_like
+	 * heuristics reject on arches whose module window sits below
+	 * VMALLOC_START (armv7) or whose pointers are not x86-canonical
+	 * (powerpc).  NULL pointers are the shape real rootkits leave
+	 * behind, and mod_hunter explicitly accepts them. */
+	list_del(&THIS_MODULE->list);
+	THIS_MODULE->list.next = NULL;
+	THIS_MODULE->list.prev = NULL;
 	pr_info("hide_self: unlinked from module list (test sample)\n");
 	return 0;
 }

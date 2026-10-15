@@ -135,7 +135,9 @@ fi
 # Diagnose the kallsyms-based symbol resolution: ALIRT needs KALLSYMS_ALL
 # (data symbols: init_mm, module_kset) and KPROBES (kln resolution); print
 # the effective values so a silent olddefconfig drop is visible in the log.
-grep -E "^CONFIG_KALLSYMS|^# CONFIG_KALLSYMS|^CONFIG_KPROBES|^# CONFIG_KPROBES" \
+# ARM_LPAE / PPC_RADIX_MMU / PPC_BOOK3S_64 decide whether the high-memory
+# module-window assumptions in the arch alirt_mm.h layers actually apply.
+grep -E "^CONFIG_KALLSYMS|^# CONFIG_KALLSYMS|^CONFIG_KPROBES|^# CONFIG_KPROBES|^CONFIG_ARM_LPAE|^# CONFIG_ARM_LPAE|^CONFIG_PPC_RADIX_MMU|^# CONFIG_PPC_RADIX_MMU|^CONFIG_PPC_BOOK3S_64|^# CONFIG_PPC_BOOK3S_64" \
     "$KDIR/.config" || true
 
 kmake() {

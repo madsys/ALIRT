@@ -280,4 +280,21 @@ static inline bool alirt_is_module_space(const void *p)
 	       (unsigned long)p < MODULES_END;
 }
 
+/*
+ * mod_hunter.c's mh_ptr_high_or_zero() rejects any candidate list pointer
+ * below VMALLOC_START — an x86-centric gate.  Since the arm64 VA-layout
+ * consolidation (6.9+) VMALLOC_START == MODULES_END, i.e. the entire
+ * dedicated module window [MODULES_VADDR, MODULES_END) sits below it, so
+ * every genuine struct module (mod_hunter itself included) was rejected
+ * and the scan reported zero candidates.  Pointer validity is already
+ * enforced per-arch by alirt_addr_valid(), and the sext48/57 shape check
+ * that follows accepts both the module window (0xffff80...) and the
+ * direct map (0xffff00...), so lower the first gate to "any non-NULL
+ * pointer".  This header is included last in mod_hunter.c (after
+ * <linux/vmalloc.h>), and nothing above this point in the file uses the
+ * macro, so neutralizing it here affects only the candidate gate.
+ */
+#undef VMALLOC_START
+#define VMALLOC_START 0UL
+
 #endif /* ALIRT_ARCH_ARM64_MM_H */

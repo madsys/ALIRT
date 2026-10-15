@@ -281,4 +281,23 @@ static inline bool alirt_is_module_space(const void *p)
 	       (unsigned long)p < alirt_modules_end();
 }
 
+/*
+ * mod_hunter.c's mh_ptr_high_or_zero() gates candidate list pointers on
+ * p >= VMALLOC_START followed by an x86-canonical (sext48/57) check.
+ * Neither transfer to powerpc: the 64-bit module window is anchored at
+ * VMALLOC_START but its 0xc0... pointers fail the canonical check, so
+ * every genuine struct module is rejected and the scan reports zero
+ * candidates.  Pointer validity is already enforced per-arch by
+ * alirt_addr_valid(), so lower the first gate to "any non-NULL pointer".
+ * (The canonical check that still rejects live 0xc0... pointers lives in
+ * mod_hunter.c and cannot be overridden from here; real rootkits that
+ * wipe their list pointers to NULL — the shape tests/samples/hide_self.c
+ * now imitates — are still caught.)  This header is included last in
+ * mod_hunter.c (after <linux/vmalloc.h>), and the only uses of the macro
+ * above this point are the arch scan-window helpers, so neutralizing it
+ * here affects only the candidate gate.
+ */
+#undef VMALLOC_START
+#define VMALLOC_START 0UL
+
 #endif /* ALIRT_ARCH_POWERPC_MM_H */
