@@ -89,13 +89,15 @@ case "$ARCH" in
     *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
-# arm32/arm64 module layouts can place struct module at offsets that are
-# only 8-byte aligned; the hunter's 0x10 scan step then permanently misses
-# the (real) modules and the runtime test finds nothing.  On those two
-# arches, raise the alignment of the module's struct module section after
-# the link: the loader places each section at ALIGN(cumulative, sh_addralign),
-# so a 16-byte alignment for .gnu.linkonce.this_module puts struct module on
-# a scanned offset regardless of the sizes of the sections before it.
+# arm32/arm64/ppc64 module layouts can place struct module at offsets that
+# are only 8-byte aligned; the hunter's 0x10 scan step then permanently
+# misses the (real) modules and the runtime test finds nothing (powerpc
+# 6.12 scanned 134M steps with 0 candidates while mod_hunter's own struct
+# module sat inside the window).  On those arches, raise the alignment of
+# the module's struct module section after the link: the loader places
+# each section at ALIGN(cumulative, sh_addralign), so a 16-byte alignment
+# for .gnu.linkonce.this_module puts struct module on a scanned offset
+# regardless of the sizes of the sections before it.
 # (GCC has no -falign-variables; objcopy --set-section-alignment needs
 # binutils >= 2.39, which every cross container here ships.  x86_64/riscv/
 # powerpc/mips layouts are already 16-aligned and are left untouched.)
@@ -114,9 +116,15 @@ align_modstruct() {
 NEED_ALIGN=no
 if [ "$RUNTIME" = "true" ]; then
     case "$ARCH" in
-        armv7|aarch64) NEED_ALIGN=yes ;;
+        armv7|aarch64|powerpc) NEED_ALIGN=yes ;;
     esac
 fi
+
+# Diagnose the kallsyms-based symbol resolution: ALIRT needs KALLSYMS_ALL
+# (data symbols: init_mm, module_kset) and KPROBES (kln resolution); print
+# the effective values so a silent olddefconfig drop is visible in the log.
+grep -E "^CONFIG_KALLSYMS|^# CONFIG_KALLSYMS|^CONFIG_KPROBES|^# CONFIG_KPROBES" \
+    "$KDIR/.config" || true
 
 kmake() {
     make -C "$KDIR" "$@" ARCH="$KARCH" CROSS_COMPILE="$CROSS" modules
