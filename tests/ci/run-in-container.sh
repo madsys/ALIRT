@@ -160,7 +160,8 @@ if [ "$RUNTIME" = "true" ]; then
                      CONSOLE="ttyAMA0" ;;
             mips)    QEMU="qemu-system-mips64el -M malta"
                      KIMG="$KDIR/vmlinux"
-                     CONSOLE="ttyS0" ;;
+                     CONSOLE="ttyS0"
+                     QMEM="-m 512M" ;;
             powerpc) QEMU="qemu-system-ppc64 -M pseries"
                      KIMG="$KDIR/arch/powerpc/boot/zImage"
                      CONSOLE="hvc0" ;;
@@ -170,9 +171,12 @@ if [ "$RUNTIME" = "true" ]; then
             *) echo "RUNTIME-RESULT: FAIL (no QEMU mapping for $ARCH)"; exit 1 ;;
         esac
         # TCG emulation is slow (a full defconfig kernel under emulation):
-        # allow 7 minutes for boot + module load + scan.
+        # allow 7 minutes for boot + module load + scan.  mips Malta is
+        # o32 without CONFIG_HIGHMEM, so cap RAM at 512M: a 1G lowmem
+        # region can hang the guest before the serial console registers,
+        # producing a completely silent boot.
         # shellcheck disable=SC2086
-        timeout 420 $QEMU -m 1G \
+        timeout 420 $QEMU ${QMEM:--m 1G} \
             -kernel "$KIMG" \
             -initrd /ir.cpio.gz \
             -append "console=$CONSOLE,115200 loglevel=8 panic=10" \

@@ -123,6 +123,33 @@ int main(void)
 		(void)w;
 	}
 
+	/* Diagnostic context: where the kernel actually placed the modules.
+	 * /proc/vmallocinfo lists every vmalloc/module allocation; keep only
+	 * the module-related lines so console noise stays low. */
+	fd = open("/proc/vmallocinfo", O_RDONLY);
+	if (fd >= 0) {
+		static char vb[64 * 1024];
+		ssize_t voff = 0, n;
+
+		while (voff < (ssize_t)sizeof(vb)) {
+			n = read(fd, vb + voff, sizeof(vb) - voff);
+			if (n <= 0)
+				break;
+			voff += n;
+		}
+		close(fd);
+		wr("--- vmallocinfo (module allocations) ---\n");
+		for (ssize_t i = 0, ls = 0; i < voff; i++) {
+			if (vb[i] == '\n') {
+				if (memmem(vb + ls, i - ls, "module", 6)) {
+					ssize_t w2 = write(1, vb + ls, i - ls + 1);
+					(void)w2;
+				}
+				ls = i + 1;
+			}
+		}
+	}
+
 	/* mod_hunter verdicts: [CRITICAL]=hidden from list+kset,
 	 * [HIGH]=in kset but missing from the module list (unlinked = hidden).
 	 * Either verdict means the scanner found a module the list does not

@@ -172,6 +172,35 @@ static inline int alirt_resolve_kln(unsigned long (**kln)(const char *name))
 	if (ret < 0)
 		return ret;
 	*kln = (unsigned long (*)(const char *name))kp.addr;
+#if defined(CONFIG_PPC64) && defined(CONFIG_PPC64_ELF_ABI_V2)
+	/*
+	 * ppc64 ELFv2: kprobe_lookup_name() resolves the probe address to the
+	 * function's LOCAL entry point (ppc_function_entry() skips the global
+	 * entry, or the ftrace site within the first 16 bytes with
+	 * CONFIG_KPROBES_ON_FTRACE).  Calling that address directly runs the
+	 * callee with the *caller's* TOC in r2 (a module's TOC lives in the
+	 * module allocation), so the first TOC-relative load faults - seen
+	 * in practice as a data-access oops inside kallsyms_lookup_names with
+	 * r2 pointing into the vmalloc area.  The global entry is a short
+	 * fixed prologue starting with `addis r2,r12,<toc-16off>@ha`
+	 * (opcode 14, RT=2, RA=12); scan back from the reported address to
+	 * find it and hand out the callable global entry instead.  r12 is
+	 * loaded with the target address by the caller-side indirect-call
+	 * sequence, so the GE re-establishes the kernel TOC on entry.
+	 */
+	{
+		unsigned long base = ((unsigned long)*kln & ~3UL) - 4;
+		int i;
+
+		for (i = 0; i < 4 && base >= 4; i++, base -= 4) {
+			unsigned int insn = *(unsigned int *)base;
+
+			if ((insn & 0xFC1F0000u) == 0x384C0000u)
+				break;
+		}
+		*kln = (unsigned long (*)(const char *name))base;
+	}
+#endif
 	unregister_kprobe(&kp);
 	return *kln ? 0 : -ENOENT;
 #else
