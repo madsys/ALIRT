@@ -28,11 +28,25 @@ jobs:
           - { kver: "7.2.10",   image: "ubuntu:24.04", arch: "x86_64",  runtime: true }
           - { kver: "5.15.180", image: "ubuntu:22.04", arch: "aarch64", runtime: false }
           - { kver: "6.12.35",  image: "ubuntu:24.04", arch: "aarch64", runtime: false }
-          # Cross-architecture QEMU runtime jobs (staged rollout): qarch
-          # selects the QEMU emulator/mapping used by run-in-container.sh;
-          # tag distinguishes these runtime jobs from the compile-only
-          # aarch64 entries above in artifacts and job names.
+          # Cross-architecture QEMU runtime jobs: qarch selects the QEMU
+          # emulator/mapping used by run-in-container.sh; tag distinguishes
+          # these runtime jobs from the compile-only aarch64 entries above
+          # in artifacts and job names.
           - { kver: "6.12.35",  image: "ubuntu:24.04", arch: "aarch64", runtime: true, qarch: "aarch64", tag: "-rt" }
+          - { kver: "6.18.56",  image: "ubuntu:24.04", arch: "aarch64", runtime: true, qarch: "aarch64", tag: "-rt" }
+          - { kver: "7.2.10",   image: "ubuntu:24.04", arch: "aarch64", runtime: true, qarch: "aarch64", tag: "-rt" }
+          - { kver: "6.12.35",  image: "ubuntu:24.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
+          - { kver: "6.18.56",  image: "ubuntu:24.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
+          - { kver: "7.2.10",   image: "ubuntu:24.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
+          - { kver: "6.12.35",  image: "ubuntu:24.04", arch: "mips",    runtime: true, qarch: "mips",    tag: "-rt" }
+          - { kver: "6.18.56",  image: "ubuntu:24.04", arch: "mips",    runtime: true, qarch: "mips",    tag: "-rt" }
+          - { kver: "7.2.10",   image: "ubuntu:24.04", arch: "mips",    runtime: true, qarch: "mips",    tag: "-rt" }
+          - { kver: "6.12.35",  image: "ubuntu:24.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
+          - { kver: "6.18.56",  image: "ubuntu:24.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
+          - { kver: "7.2.10",   image: "ubuntu:24.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
+          - { kver: "6.12.35",  image: "ubuntu:24.04", arch: "riscv",   runtime: true, qarch: "riscv",   tag: "-rt" }
+          - { kver: "6.18.56",  image: "ubuntu:24.04", arch: "riscv",   runtime: true, qarch: "riscv",   tag: "-rt" }
+          - { kver: "7.2.10",   image: "ubuntu:24.04", arch: "riscv",   runtime: true, qarch: "riscv",   tag: "-rt" }
 
     steps:
       - uses: actions/checkout@v4
