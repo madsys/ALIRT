@@ -174,31 +174,44 @@ static inline int alirt_resolve_kln(unsigned long (**kln)(const char *name))
 	*kln = (unsigned long (*)(const char *name))kp.addr;
 #if defined(CONFIG_PPC64) && defined(CONFIG_PPC64_ELF_ABI_V2)
 	/*
-	 * ppc64 ELFv2: kprobe_lookup_name() resolves the probe address to the
-	 * function's LOCAL entry point (ppc_function_entry() skips the global
-	 * entry, or the ftrace site within the first 16 bytes with
-	 * CONFIG_KPROBES_ON_FTRACE).  Calling that address directly runs the
-	 * callee with the *caller's* TOC in r2 (a module's TOC lives in the
-	 * module allocation), so the first TOC-relative load faults - seen
-	 * in practice as a data-access oops inside kallsyms_lookup_names with
-	 * r2 pointing into the vmalloc area.  The global entry is a short
-	 * fixed prologue starting with `addis r2,r12,<toc-16off>@ha`
-	 * (opcode 14, RT=2, RA=12); scan back from the reported address to
-	 * find it and hand out the callable global entry instead.  r12 is
-	 * loaded with the target address by the caller-side indirect-call
-	 * sequence, so the GE re-establishes the kernel TOC on entry.
+	 * ppc64 ELFv2: kprobe_lookup_name() hands back either the function's
+	 * LOCAL entry point (ppc_function_entry() skips the global entry) or,
+	 * with CONFIG_KPROBES_ON_FTRACE, the ftrace site - which livepatch.h
+	 * guarantees to lie within the first 16 bytes of the function, i.e.
+	 * right after the -mprofile-kernel fentry stub.  Calling such an
+	 * address directly runs the callee with the *caller's* TOC in r2 (a
+	 * module's TOC lives in the module allocation), so the first
+	 * TOC-relative load faults - seen in practice as a data-access oops
+	 * inside kallsyms code with r2 pointing into the vmalloc area.
+	 *
+	 * The global entry is the fixed two-instruction prologue
+	 *   addis r2,r12,<toc-8+0x8000>@ha   (0x3C4Cxxxx; linker may use
+	 *                                     lis r2,  0x3C40xxxx)
+	 *   addi  r2,r2,<toc-8>&0xffff       (0x3842xxxx)
+	 * exactly as ppc_function_entry() in asm/code-patching.h identifies
+	 * it (OP_RT_RA_MASK = 0xffff0000).  kp.addr is GE+8 (local entry)
+	 * or at most GE+16 (ftrace site), so a scan window reaching 24
+	 * bytes back from kp.addr always covers the prologue.  r12 is loaded
+	 * with the target address by the caller-side indirect-call sequence,
+	 * so calling the GE re-establishes the kernel TOC on entry.
 	 */
 	{
-		unsigned long base = ((unsigned long)*kln & ~3UL) - 4;
-		int i;
+		unsigned long a = (unsigned long)*kln & ~3UL;
+		unsigned long lo = a >= 24 ? a - 24 : 0;
+		unsigned long cand;
 
-		for (i = 0; i < 4 && base >= 4; i++, base -= 4) {
-			unsigned int insn = *(unsigned int *)base;
+		for (cand = lo; cand + 8 <= a + 8; cand += 4) {
+			unsigned int i0 = *(unsigned int *)cand;
+			unsigned int i1 = *(unsigned int *)(cand + 4);
 
-			if ((insn & 0xFC1F0000u) == 0x384C0000u)
+			if (((i0 & 0xFFFF0000u) == 0x3C4C0000u ||   /* addis r2,r12 */
+			     (i0 & 0xFFFF0000u) == 0x3C400000u) &&  /* lis   r2   */
+			    (i1 & 0xFFFF0000u) == 0x38440000u)     /* addi  r2,r2 */
 				break;
 		}
-		*kln = (unsigned long (*)(const char *name))base;
+		if (cand + 8 <= a + 8)
+			*kln = (unsigned long (*)(const char *name))cand;
+		/* else: no match; leave kp.addr as-is (no worse than before) */
 	}
 #endif
 	unregister_kprobe(&kp);
