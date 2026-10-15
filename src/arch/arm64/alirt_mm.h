@@ -161,26 +161,25 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
  * are skipped and the entry is re-examined at the deepest real level,
  * where the level-independent type encoding still identifies a block
  * (the span then comes from that level's shift).
+ *
+ * Block (section) descriptors are identified by the level-independent
+ * 2-bit type encoding, (val & *_TYPE_MASK) == *_TYPE_SECT — exactly
+ * what pmd_sect()/pud_sect() tested from 3.16/3.17 until they were
+ * removed in 7.2 (pmd_leaf()/pud_leaf() took over).  The raw test is
+ * used here instead: PMD_TYPE_MASK/PMD_TYPE_SECT are defined unguarded
+ * in asm/pgtable-hwdef.h on every kernel since 3.7, and PUD_TYPE_MASK/
+ * PUD_TYPE_SECT since the 3.17 48-bit VA series (i.e. whenever the PUD
+ * level can physically exist — the only configs where the PUD test is
+ * expanded).  The call sites below additionally gate on
+ * ALIRT_PGTABLE_LEVELS, which is what keeps the PUD test out of builds
+ * whose PUD level is folded.
  */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 16, 0)
-   /* pmd_sect() exists since 3.16 and pud_sect() since 3.16/3.17 (48-bit
-    * VA series); both are defined for every config (the arch stubs them
-    * to 0 where the level is folded).  The call sites below additionally
-    * gate on ALIRT_PGTABLE_LEVELS, which is what keeps PUD_SHIFT and the
-    * PUD block test out of builds whose PUD level is folded. */
-#  define alirt_pmd_is_block(pmd) pmd_sect(pmd)
-#  if ALIRT_PGTABLE_LEVELS > 3
-#    define alirt_pud_is_block(pud) pud_sect(pud)
-#  else
-#    define alirt_pud_is_block(pud) 0
-#  endif
-#else
-   /* 3.7-3.15: no pmd_sect()/pud_sect().  PMD_TYPE_MASK/PMD_TYPE_SECT are
-    * defined unguarded in asm/pgtable-hwdef.h on every 3.7+ kernel; the
-    * PUD level is always folded in this range (48-bit VA only exists
-    * since 3.17), so it can never hold a block. */
-#  define alirt_pmd_is_block(pmd) \
+#define alirt_pmd_is_block(pmd) \
 	((pmd_val(pmd) & PMD_TYPE_MASK) == PMD_TYPE_SECT)
+#if ALIRT_PGTABLE_LEVELS > 3
+#  define alirt_pud_is_block(pud) \
+	((pud_val(pud) & PUD_TYPE_MASK) == PUD_TYPE_SECT)
+#else
 #  define alirt_pud_is_block(pud) 0
 #endif
 
