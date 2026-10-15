@@ -83,7 +83,7 @@ case "$ARCH" in
     x86_64)  KARCH=x86;     CROSS="" ;;
     aarch64) KARCH=arm64;   CROSS="aarch64-linux-gnu-" ;;
     armv7)   KARCH=arm;     CROSS="arm-linux-gnueabihf-" ;;
-    mips)    KARCH=mips;    CROSS="mips64-linux-gnuabi64-" ;;
+    mips)    KARCH=mips;    CROSS="mips-linux-gnu-";        ;;
     powerpc) KARCH=powerpc; CROSS="powerpc64-linux-gnu-" ;;
     riscv)   KARCH=riscv;   CROSS="riscv64-linux-gnu-" ;;
     *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
