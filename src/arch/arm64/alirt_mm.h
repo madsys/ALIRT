@@ -109,6 +109,9 @@
  */
 static struct mm_struct *alirt_mm_init_mm;
 
+/* Defined below; exercised by the init-time self-test. */
+static inline bool alirt_addr_valid(unsigned long addr, size_t size);
+
 /*
  * Resolve init_mm through kallsyms.  @kln is a working
  * kallsyms_lookup_name (see alirt_resolve_kln() in compat.h; NULL is
@@ -117,9 +120,32 @@ static struct mm_struct *alirt_mm_init_mm;
  */
 static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 {
+	unsigned long tm, bn, sw;
+	int vim, vtm, vbn;
+
 	if (!kln)
 		return -EINVAL;
 	alirt_mm_init_mm = (struct mm_struct *)kln("init_mm");
+
+	/* Init-time self-test (one line): probe the walker against three
+	 * known-mapped landmarks — init_mm itself (kernel-image .data),
+	 * our own struct module (execmem/module range, KASLR-placed), and
+	 * linux_banner (.rodata) — so a walker that silently rejects
+	 * everything is distinguishable in CI logs from a wrong scan
+	 * window.  TEMP diagnostic while aarch64 runtime is being
+	 * brought up. */
+	tm = (unsigned long)THIS_MODULE;
+	bn = kln("linux_banner");
+	sw = kln("swapper_pg_dir");
+	vim = alirt_mm_init_mm ? alirt_addr_valid((unsigned long)alirt_mm_init_mm, 64) : -1;
+	vtm = alirt_addr_valid(tm, 64);
+	vbn = bn ? alirt_addr_valid(bn, 64) : -1;
+	pr_info("alirt: arm64 self-test: init_mm=%px(valid=%d,pgd=%px) "
+		"this_module=%lx(valid=%d) banner=%lx(valid=%d) swapper=%lx\n",
+		alirt_mm_init_mm, vim,
+		alirt_mm_init_mm ? alirt_mm_init_mm->pgd : NULL,
+		tm, vtm, bn, vbn, sw);
+
 	return alirt_mm_init_mm ? 0 : -ENOENT;
 }
 

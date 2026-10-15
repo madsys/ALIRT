@@ -136,8 +136,9 @@ fi
 # (data symbols: init_mm, module_kset) and KPROBES (kln resolution); print
 # the effective values so a silent olddefconfig drop is visible in the log.
 # ARM_LPAE / PPC_RADIX_MMU / PPC_BOOK3S_64 decide whether the high-memory
-# module-window assumptions in the arch alirt_mm.h layers actually apply.
-grep -E "^CONFIG_KALLSYMS|^# CONFIG_KALLSYMS|^CONFIG_KPROBES|^# CONFIG_KPROBES|^CONFIG_ARM_LPAE|^# CONFIG_ARM_LPAE|^CONFIG_PPC_RADIX_MMU|^# CONFIG_PPC_RADIX_MMU|^CONFIG_PPC_BOOK3S_64|^# CONFIG_PPC_BOOK3S_64" \
+# module-window assumptions in the arch alirt_mm.h layers actually apply;
+# the ARM64_VA_BITS / KASAN / RANDOMIZE_* lines pin down the aarch64 layout.
+grep -E "^CONFIG_KALLSYMS|^# CONFIG_KALLSYMS|^CONFIG_KPROBES|^# CONFIG_KPROBES|^CONFIG_ARM_LPAE|^# CONFIG_ARM_LPAE|^CONFIG_PPC_RADIX_MMU|^# CONFIG_PPC_RADIX_MMU|^CONFIG_PPC_BOOK3S_64|^# CONFIG_PPC_BOOK3S_64|^CONFIG_ARM64_VA_BITS|^# CONFIG_ARM64_VA_BITS|^CONFIG_KASAN=|^# CONFIG_KASAN|^CONFIG_RANDOMIZE_BASE|^# CONFIG_RANDOMIZE_BASE|^CONFIG_RANDOMIZE_MODULE_REGION_FULL|^# CONFIG_RANDOMIZE_MODULE_REGION_FULL|^CONFIG_ARM64_LPA2|^# CONFIG_ARM64_LPA2" \
     "$KDIR/.config" || true
 
 kmake() {
