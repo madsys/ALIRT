@@ -13,15 +13,17 @@ ARCH="${2:-x86_64}"
 # removed from the kernel tree, so use malta_defconfig (32-bit BE): the
 # 64-bit Malta CPU in QEMU runs o32 kernels fine, and the 32-bit
 # mips-linux-gnu toolchain matches the kernel ABI for module builds.
-# The pseries job uses the 64-bit big-endian pseries_defconfig (the le
-# variant of the toolchain would need a CONFIG_CPU_LITTLE_ENDIAN flip,
-# BE keeps the defconfig untouched).
+# The pseries job uses pseries_defconfig, which is a generated config
+# (ppc64_defconfig + le + guest + kvm_guest fragments), i.e. a ppc64
+# little-endian kernel; powerpc64le-linux-gnu matches it end to end and
+# the static init binary must be little-endian too (a BE binary fails
+# execve with -ENOEXEC on an LE kernel).
 case "$ARCH" in
     x86_64)  KARCH=x86;     CROSS="";                       IMG=bzImage; DEFCFG=defconfig ;;
     aarch64) KARCH=arm64;   CROSS="aarch64-linux-gnu-";     IMG=Image;   DEFCFG=defconfig ;;
     armv7)   KARCH=arm;     CROSS="arm-linux-gnueabihf-";   IMG=zImage;  DEFCFG=multi_v7_defconfig ;;
     mips)    KARCH=mips;    CROSS="mips-linux-gnu-";        IMG=vmlinux; DEFCFG=malta_defconfig ;;
-    powerpc) KARCH=powerpc; CROSS="powerpc64-linux-gnu-";   IMG=zImage;  DEFCFG=pseries_defconfig ;;
+    powerpc) KARCH=powerpc; CROSS="powerpc64le-linux-gnu-"; IMG=zImage;  DEFCFG=pseries_defconfig ;;
     riscv)   KARCH=riscv;   CROSS="riscv64-linux-gnu-";     IMG=Image;   DEFCFG=defconfig ;;
     *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
@@ -41,6 +43,18 @@ make ARCH="$KARCH" CROSS_COMPILE="$CROSS" "$DEFCFG" >/dev/null
 # if an arch does not define the symbol, olddefconfig silently drops the
 # orphan line and the build proceeds.
 ./scripts/config --enable KALLSYMS_ALL
+# ALIRT resolves kallsyms_lookup_name via the kprobe trick on >= 5.7
+# (see alirt_resolve_kln() in compat.h); without CONFIG_KPROBES that
+# resolution returns -ENODEV and every kallsyms-based cross-check plus
+# the init_mm-dependent address validation degrade.  The cross-arch
+# defconfigs ship KPROBES=n, so force it on like KALLSYMS_ALL.
+./scripts/config --enable KPROBES
+if [ "$ARCH" = "mips" ]; then
+    # malta_defconfig is little-endian (CONFIG_CPU_LITTLE_ENDIAN) since the
+    # 5.x cycle, but the CI job boots the big-endian qemu-system-mips64 with
+    # the big-endian mips-linux-gnu toolchain; flip the endianness choice.
+    ./scripts/config --enable CPU_BIG_ENDIAN
+fi
 make ARCH="$KARCH" CROSS_COMPILE="$CROSS" olddefconfig >/dev/null
 # Note: the kernel image target differs per arch (x86=bzImage, arm64=Image, riscv=Image)
 make -j"$(nproc)" ARCH="$KARCH" CROSS_COMPILE="$CROSS" "$IMG" modules >/dev/null

@@ -46,7 +46,7 @@ if command -v apt-get >/dev/null 2>&1; then
                  [ "$RUNTIME" = "true" ] && PKGS="$PKGS qemu-system-arm" ;;
         mips)    PKGS="$PKGS gcc-mips-linux-gnu"
                  [ "$RUNTIME" = "true" ] && PKGS="$PKGS qemu-system-mips" ;;
-        powerpc) PKGS="$PKGS gcc-powerpc64-linux-gnu"
+        powerpc) PKGS="$PKGS gcc-powerpc64le-linux-gnu"
                  [ "$RUNTIME" = "true" ] && PKGS="$PKGS qemu-system-ppc" ;;
         riscv)   PKGS="$PKGS gcc-riscv64-linux-gnu"
                  [ "$RUNTIME" = "true" ] && PKGS="$PKGS qemu-system-misc" ;;
@@ -84,7 +84,7 @@ case "$ARCH" in
     aarch64) KARCH=arm64;   CROSS="aarch64-linux-gnu-" ;;
     armv7)   KARCH=arm;     CROSS="arm-linux-gnueabihf-" ;;
     mips)    KARCH=mips;    CROSS="mips-linux-gnu-";        ;;
-    powerpc) KARCH=powerpc; CROSS="powerpc64-linux-gnu-" ;;
+    powerpc) KARCH=powerpc; CROSS="powerpc64le-linux-gnu-" ;;
     riscv)   KARCH=riscv;   CROSS="riscv64-linux-gnu-" ;;
     *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
