@@ -92,34 +92,43 @@ esac
 # arm32/arm64 module layouts can place struct module at offsets that are
 # only 8-byte aligned; the hunter's 0x10 scan step then permanently misses
 # the (real) modules and the runtime test finds nothing.  On those two
-# arches, force 16-byte alignment of every function/variable so each
-# module's struct module lands on a scanned offset.  Passed via a make
-# variable (KCFLAGS), quoted as a single word: an unquoted two-word
-# KCFLAGS=... assignment is split by the shell and the second word is
-# treated as a make target ("No rule to make target 'align-variables=16'").
-# x86_64/riscv/powerpc/mips layouts are already 16-aligned and are left
-# untouched.  Only armv7/aarch64 use a new enough bash for arrays, but the
-# explicit if/else keeps this portable to the CentOS 7 container too.
-ALIGN16="no"
+# arches, raise the alignment of the module's struct module section after
+# the link: the loader places each section at ALIGN(cumulative, sh_addralign),
+# so a 16-byte alignment for .gnu.linkonce.this_module puts struct module on
+# a scanned offset regardless of the sizes of the sections before it.
+# (GCC has no -falign-variables; objcopy --set-section-alignment needs
+# binutils >= 2.39, which every cross container here ships.  x86_64/riscv/
+# powerpc/mips layouts are already 16-aligned and are left untouched.)
+align_modstruct() {
+    ko="$1"
+    for sec in .gnu.linkonce.this_module __this_module; do
+        if ${CROSS}readelf -S "$ko" | grep -qE " ${sec}[[:space:]]"; then
+            ${CROSS}objcopy --set-section-alignment "$sec=16" "$ko" \
+                || echo "WARN: could not align $sec in $ko"
+            return
+        fi
+    done
+    echo "WARN: no this_module section in $ko"
+}
+
+NEED_ALIGN=no
 if [ "$RUNTIME" = "true" ]; then
     case "$ARCH" in
-        armv7|aarch64) ALIGN16="yes" ;;
+        armv7|aarch64) NEED_ALIGN=yes ;;
     esac
 fi
 
 kmake() {
-    if [ "$ALIGN16" = "yes" ]; then
-        make -C "$KDIR" "$@" ARCH="$KARCH" CROSS_COMPILE="$CROSS" \
-            KCFLAGS="-falign-functions=16 -falign-variables=16" modules
-    else
-        make -C "$KDIR" "$@" ARCH="$KARCH" CROSS_COMPILE="$CROSS" modules
-    fi
+    make -C "$KDIR" "$@" ARCH="$KARCH" CROSS_COMPILE="$CROSS" modules
 }
 
 echo "===== [3/4] Compiling ALIRT modules (src/ layout) ====="
 COMPILE_OK=1
 for tool in mod_hunter process_hunter sock_hunter; do
     if kmake "M=/src/src/$tool"; then
+        if [ "$NEED_ALIGN" = "yes" ] && [ "$tool" = "mod_hunter" ]; then
+            align_modstruct "/src/src/$tool/$tool.ko"
+        fi
         echo "COMPILE-$tool: PASS"
     else
         echo "COMPILE-$tool: FAIL"
@@ -140,6 +149,11 @@ if [ "$RUNTIME" = "true" ]; then
     # Build the self-hiding sample module
     kmake M=/src/tests/samples \
         || { echo "RUNTIME-RESULT: FAIL (sample build)"; exit 1; }
+    if [ "$NEED_ALIGN" = "yes" ]; then
+        for ko in /src/tests/samples/*.ko; do
+            align_modstruct "$ko"
+        done
+    fi
 
     # Assemble the initramfs
     R=/ir-root

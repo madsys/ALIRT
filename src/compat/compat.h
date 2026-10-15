@@ -209,9 +209,24 @@ static inline int alirt_resolve_kln(unsigned long (**kln)(const char *name))
 			    (i1 & 0xFFFF0000u) == 0x38440000u)     /* addi  r2,r2 */
 				break;
 		}
-		if (cand + 8 <= a + 8)
+		if (cand + 8 <= a + 8) {
 			*kln = (unsigned long (*)(const char *name))cand;
-		/* else: no match; leave kp.addr as-is (no worse than before) */
+		} else {
+			/* No match: leave kp.addr as-is, but log the surrounding
+			 * words - toolchains occasionally emit a different
+			 * global-entry shape, and the exact bytes decide what
+			 * the scan must accept next. */
+			char buf[192];
+			int n, j;
+
+			n = scnprintf(buf, sizeof(buf),
+				      "alirt: ppc64 GE scan: no entry prologue near %px; words:",
+				      (void *)a);
+			for (j = -24; j <= 12 && n < (int)sizeof(buf) - 10; j += 4)
+				n += scnprintf(buf + n, sizeof(buf) - n, " %08x",
+					       *(unsigned int *)(a + j));
+			pr_warn("%s\n", buf);
+		}
 	}
 #endif
 	unregister_kprobe(&kp);
