@@ -91,18 +91,35 @@ esac
 
 # arm32/arm64 module layouts can place struct module at offsets that are
 # only 8-byte aligned; the hunter's 0x10 scan step then permanently misses
-# the (real) modules and the runtime test finds nothing.  Force 16-byte
-# alignment of every function/variable so each module's struct module
-# lands on a scanned offset.  (x86_64/riscv/powerpc/mips layouts are
-# already 16-aligned; the flag is a no-op safety net there, so apply it
-# everywhere a runtime module is built.)
-ALIGN16=""
-[ "$RUNTIME" = "true" ] && ALIGN16='KCFLAGS=-falign-functions=16 -falign-variables=16'
+# the (real) modules and the runtime test finds nothing.  On those two
+# arches, force 16-byte alignment of every function/variable so each
+# module's struct module lands on a scanned offset.  Passed via a make
+# variable (KCFLAGS), quoted as a single word: an unquoted two-word
+# KCFLAGS=... assignment is split by the shell and the second word is
+# treated as a make target ("No rule to make target 'align-variables=16'").
+# x86_64/riscv/powerpc/mips layouts are already 16-aligned and are left
+# untouched.  Only armv7/aarch64 use a new enough bash for arrays, but the
+# explicit if/else keeps this portable to the CentOS 7 container too.
+ALIGN16="no"
+if [ "$RUNTIME" = "true" ]; then
+    case "$ARCH" in
+        armv7|aarch64) ALIGN16="yes" ;;
+    esac
+fi
+
+kmake() {
+    if [ "$ALIGN16" = "yes" ]; then
+        make -C "$KDIR" "$@" ARCH="$KARCH" CROSS_COMPILE="$CROSS" \
+            KCFLAGS="-falign-functions=16 -falign-variables=16" modules
+    else
+        make -C "$KDIR" "$@" ARCH="$KARCH" CROSS_COMPILE="$CROSS" modules
+    fi
+}
 
 echo "===== [3/4] Compiling ALIRT modules (src/ layout) ====="
 COMPILE_OK=1
 for tool in mod_hunter process_hunter sock_hunter; do
-    if make -C "$KDIR" "M=/src/src/$tool" ARCH="$KARCH" CROSS_COMPILE="$CROSS" $ALIGN16 modules; then
+    if kmake "M=/src/src/$tool"; then
         echo "COMPILE-$tool: PASS"
     else
         echo "COMPILE-$tool: FAIL"
@@ -112,7 +129,7 @@ done
 [ "$COMPILE_OK" = 1 ] && echo "COMPILE-RESULT: PASS" || echo "COMPILE-RESULT: FAIL"
 
 # mod_dumper is built standalone (failure does not block the main flow; logged separately)
-if make -C "$KDIR" M=/src/src/mod_dumper ARCH="$KARCH" CROSS_COMPILE="$CROSS" modules; then
+if kmake M=/src/src/mod_dumper; then
     echo "COMPILE-MODUMPER: PASS"
 else
     echo "COMPILE-MODUMPER: FAIL"
@@ -121,7 +138,7 @@ fi
 if [ "$RUNTIME" = "true" ]; then
     echo "===== [4/4] QEMU runtime detection test ====="
     # Build the self-hiding sample module
-    make -C "$KDIR" M=/src/tests/samples ARCH="$KARCH" CROSS_COMPILE="$CROSS" $ALIGN16 modules \
+    kmake M=/src/tests/samples \
         || { echo "RUNTIME-RESULT: FAIL (sample build)"; exit 1; }
 
     # Assemble the initramfs
