@@ -206,7 +206,7 @@ static inline int alirt_resolve_kln(unsigned long (**kln)(const char *name))
 
 			if (((i0 & 0xFFFF0000u) == 0x3C4C0000u ||   /* addis r2,r12 */
 			     (i0 & 0xFFFF0000u) == 0x3C400000u) &&  /* lis   r2   */
-			    (i1 & 0xFFFF0000u) == 0x38440000u)     /* addi  r2,r2 */
+			    (i1 & 0xFFFF0000u) == 0x38420000u)     /* addi  r2,r2 */
 				break;
 		}
 		if (cand + 8 <= a + 8) {
