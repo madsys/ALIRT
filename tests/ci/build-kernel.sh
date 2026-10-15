@@ -52,8 +52,9 @@ make ARCH="$KARCH" CROSS_COMPILE="$CROSS" "$DEFCFG" >/dev/null
 if [ "$ARCH" = "mips" ]; then
     # malta_defconfig is little-endian (CONFIG_CPU_LITTLE_ENDIAN) since the
     # 5.x cycle, but the CI job boots the big-endian qemu-system-mips64 with
-    # the big-endian mips-linux-gnu toolchain; flip the endianness choice.
-    ./scripts/config --enable CPU_BIG_ENDIAN
+    # the big-endian mips-linux-gnu toolchain; flip the endianness choice
+    # explicitly both ways or olddefconfig may keep the little-endian side.
+    ./scripts/config --disable CPU_LITTLE_ENDIAN --enable CPU_BIG_ENDIAN
 fi
 make ARCH="$KARCH" CROSS_COMPILE="$CROSS" olddefconfig >/dev/null
 # Note: the kernel image target differs per arch (x86=bzImage, arm64=Image, riscv=Image)
