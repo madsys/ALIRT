@@ -4,7 +4,7 @@ ALIRT builds on the work of many people. In particular:
 - **madsys** — original author of module_hunter and the "Finding hidden kernel
   modules (the extrem way)" technique (Phrack 61-3, 2005).
 
-- **CoolQ** — co-author of the original AIRT tools (2004-2005), including the
+- **CoolQ** — co-author of the original AIRT (2004-2005), including the
   4g/4g patch and PAE groundwork in the original mod_hunter.
 
 - **g1inko (ksen-lin)** — author of [nitara2](https://github.com/ksen-lin/nitara2),
