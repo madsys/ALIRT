@@ -27,14 +27,13 @@ case "$ARCH" in
     armv7)   KARCH=arm;     CROSS="arm-linux-gnueabihf-";   IMG=zImage;  DEFCFG=multi_v7_defconfig ;;
     mips)    KARCH=mips;    CROSS="mipsel-linux-gnu-";      IMG=vmlinux; DEFCFG=malta_defconfig ;;
     powerpc) KARCH=powerpc; CROSS="powerpc64le-linux-gnu-"; IMG=zImage
-             # pseries_defconfig (the little-endian guest config) only
-             # exists from 4.17; older kernels start from ppc64_defconfig
-             # (big-endian) and must be switched to little-endian to match
-             # the ppc64le toolchain and the LE static init binary.
+             # pseries_defconfig only exists from 4.17; older kernels start
+             # from ppc64_defconfig.  Either way the config is switched to
+             # little-endian below.
              if [ "$(printf '%s\n' "4.17" "$KVER" | sort -V | head -n1)" = "4.17" ]; then
                  DEFCFG=pseries_defconfig
              else
-                 DEFCFG=ppc64_defconfig; PPC_OLD_LE=1
+                 DEFCFG=ppc64_defconfig
              fi ;;
     riscv)   KARCH=riscv;   CROSS="riscv64-linux-gnu-";     DEFCFG=defconfig
              # arch/riscv/boot/ (the Image target) only exists from v4.20;
@@ -95,8 +94,14 @@ fi
 # gcc-9 vs the 5.10 nfsd code trips a clamp() compiletime_assert in
 # fs/nfsd/nfs4state.c; nothing in ALIRT needs the NFS server.
 ./scripts/config --disable NFSD
-if [ "${PPC_OLD_LE:-0}" = "1" ]; then
-    ./scripts/config --enable CPU_LITTLE_ENDIAN
+if [ "$KARCH" = "powerpc" ]; then
+    # The cross toolchain (powerpc64le), the QEMU pseries machine and the
+    # static init binary are all little-endian.  Several defconfigs in the
+    # matrix (e.g. v5.15's pseries_defconfig) are big-endian; a BE guest
+    # kernel builds fine but SLOF dies on the very first instruction with
+    # a program exception (the LE machine byte-swaps the entry opcode).
+    # Force LE on every version.
+    ./scripts/config --disable CPU_BIG_ENDIAN --enable CPU_LITTLE_ENDIAN
 fi
 make ARCH="$KARCH" CROSS_COMPILE="$CROSS" olddefconfig >/dev/null
 # Note: the kernel image target differs per arch (x86=bzImage, arm64=Image,

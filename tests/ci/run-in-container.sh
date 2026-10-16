@@ -226,8 +226,8 @@ if [ "$RUNTIME" = "true" ]; then
         #             qemu-system-mips64el CPU, and BE Malta under QEMU
         #             8.2 TCG is silent in either width), 8250 -> ttyS0
         #   powerpc : pSeries, hypervisor console -> hvc0
-        #   riscv   : virt (OpenSBI bundled with QEMU boots the Image;
-        #             4.19: ELF vmlinux with -bios none), 8250 -> ttyS0
+        #   riscv   : virt (OpenSBI with -bios default boots the Image;
+        #             4.19: ELF vmlinux), 8250 -> ttyS0
         "${CROSS}gcc" -O2 -static -Wall -o "$R/init" /src/tests/init-cross.c \
             || { echo "RUNTIME-RESULT: FAIL (init build)"; exit 1; }
         ( cd "$R" && find . -print0 | cpio --null -o -H newc --quiet | gzip -9 ) > /ir.cpio.gz
@@ -252,15 +252,21 @@ if [ "$RUNTIME" = "true" ]; then
                      CONSOLE="hvc0" ;;
             riscv)   QEMU="qemu-system-riscv64 -M virt"
                      CONSOLE="ttyS0"
+                     # The kernel needs SBI for its console and timer; the
+                     # guest boots M-mode into nowhere and stays silent
+                     # without OpenSBI (observed on 20.04's QEMU 4.2:
+                     # "No -bios option specified.  Not loading a
+                     # firmware.").  QEMU >= 5.2 loads the bundled OpenSBI
+                     # automatically; request it explicitly everywhere
+                     # (harmless where it is already the default).
+                     QEXTRA="-bios default"
                      if [ "$(printf '%s\n' "4.20" "$KVER" | sort -V | head -n1)" = "4.20" ]; then
-                         # 4.20+: OpenSBI (bundled with QEMU) boots the
-                         # arch/riscv/boot/Image payload.
                          KIMG="$KDIR/arch/riscv/boot/Image"
                      else
                          # v4.19 has no arch/riscv/boot/Image; boot the ELF
-                         # vmlinux directly, with no firmware.
+                         # vmlinux directly (QEMU loads it per its program
+                         # headers and OpenSBI jumps to its entry).
                          KIMG="$KDIR/vmlinux"
-                         QEXTRA="-bios none"
                      fi ;;
             *) echo "RUNTIME-RESULT: FAIL (no QEMU mapping for $ARCH)"; exit 1 ;;
         esac
