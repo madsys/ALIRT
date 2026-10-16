@@ -60,11 +60,18 @@
  * are rv64-only (rv32 folds pmd/pud into the pgd).
  *
  * Module space, per version (arch/riscv, verified):
- *   4.19 ~ 5.4    no MODULES_VADDR; module_alloc is the generic __weak
- *                 fallback (vmalloc_exec()) over the whole vmalloc
- *                 area.  The region is 64GB - far beyond the scanner's
- *                 step cap - so a conservative 2GB low window
- *                 [VMALLOC_START, VMALLOC_START + 2GB) is scanned.
+ *   4.19 ~ 5.4    no MODULES_VADDR and no arch module_alloc, so the
+ *                 generic kernel/module.c allocation is used, which
+ *                 runtime-verified on v5.4.290 places at
+ *                 PFN_ALIGN(_end) - SZ_2G, growing up to VMALLOC_END
+ *                 (= PAGE_OFFSET - 1, inclusive) - i.e. the 2GB
+ *                 span below the kernel image, NOT the vmalloc bottom
+ *                 (the boot-time ioremaps land there).  The floor is
+ *                 recomputed from kallsyms; _end is a data symbol, so
+ *                 it needs CONFIG_KALLSYMS_ALL (present in the CI
+ *                 config).  Without it the static top-2GB window
+ *                 [VMALLOC_END + 1 - SZ_2G, VMALLOC_END + 1) of the
+ *                 vmalloc area is scanned instead.
  *   5.10 ~ 5.12   module_alloc = __vmalloc_node_range(
  *                 max(PFN_ALIGN(&_end - SZ_2G), VMALLOC_START),
  *                 VMALLOC_END, ...): a runtime floor in the vmalloc
@@ -175,14 +182,30 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 	}
 # else
 	/*
-	 * 4.19 ~ 5.4: module_alloc is the generic __weak vmalloc_exec()
-	 * over the whole (64GB) vmalloc area, which no scanner can cover;
-	 * use a conservative 2GB low window.  VMALLOC_END is inclusive.
+	 * 4.19 ~ 5.4: no arch module_alloc, so the generic kernel/module.c
+	 * allocation is used; runtime-verified on v5.4.290 (DIAG dump):
+	 * modules start exactly at PFN_ALIGN(_end) - SZ_2G and grow up to
+	 * VMALLOC_END (= PAGE_OFFSET - 1, inclusive) - the 2GB span below
+	 * the kernel image.  The vmalloc bottom is taken by the boot-time
+	 * ioremaps (uart, plic, pci ecam), NOT by modules.  _end needs
+	 * CONFIG_KALLSYMS_ALL; without it, fall back to the static
+	 * top-2GB window of the vmalloc area, which matches the observed
+	 * placement for any realistically sized kernel image.
 	 */
-	alirt_mod_start = VMALLOC_START;
-	alirt_mod_end = alirt_mod_start + ALIRT_RISCV_SZ_2G;
-	if (alirt_mod_end > VMALLOC_END + 1)
+	{
+		unsigned long end_sym = kln("_end");
+
+		if (end_sym) {
+			alirt_mod_start =
+				((end_sym + PAGE_SIZE - 1) & PAGE_MASK)
+				- ALIRT_RISCV_SZ_2G;
+			if (alirt_mod_start < VMALLOC_START)
+				alirt_mod_start = VMALLOC_START;
+		} else {
+			alirt_mod_start = VMALLOC_END + 1 - ALIRT_RISCV_SZ_2G;
+		}
 		alirt_mod_end = VMALLOC_END + 1;
+	}
 # endif
 #else
 	/*
@@ -202,24 +225,40 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 #endif
 
 #if defined(CONFIG_64BIT) && \
-	LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0) && \
+	LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0) && \
 	LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0)
 	/*
-	 * TEMPORARY CI diagnostic (remove once the vmalloc-bottom fault on
-	 * 4.19 ~ 5.4 is confirmed fixed): dump every busy vmap_area in and
-	 * around the module window, with flags and physical base, plus the
-	 * raw page-table chain for the first few addresses of the window.
-	 * Mirror layouts are from the v5.4 include/linux/vmalloc.h (stable
-	 * across 5.0 ~ 5.9).
+	 * TEMPORARY CI diagnostic (remove once the 4.19 ~ 5.4 module window
+	 * is confirmed fixed): dump every busy vmap_area, with flags and
+	 * physical base.  Mirror layouts are from the v4.19/v5.4
+	 * include/linux/vmalloc.h.  The vm_struct tail (flags@24,
+	 * phys_addr@48, caller@56) is identical on both.
 	 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
+	/* v4.19 struct vmap_area: flags word after va_end, purge_list and
+	 * rcu_head around vm - the list sits at +48, vm at +72. */
+#define ALIRT_DIAG_VA_LIST_OFF	48UL
+	struct alirt_diag_vmap_area_local {
+		unsigned long va_start;		/* +0  */
+		unsigned long va_end;		/* +8  */
+		unsigned long flags;		/* +16 */
+		unsigned long rb_pad[3];	/* +24 (24B) */
+		struct list_head list;		/* +48 (16B) */
+		unsigned long purge_pad[1];	/* +64 (8B llist_node) */
+		struct vm_struct *vm;		/* +72 */
+	};
+#else
+	/* v5.0 ~ v5.9 struct vmap_area: list at +40, vm at +56. */
+#define ALIRT_DIAG_VA_LIST_OFF	40UL
+	struct alirt_diag_vmap_area_local {
+		unsigned long va_start;		/* +0  */
+		unsigned long va_end;		/* +8  */
+		unsigned long rb_pad[3];	/* +16 (24B) */
+		struct list_head list;		/* +40 (16B) */
+		struct vm_struct *vm;		/* +56 */
+	};
+#endif
 	{
-		struct alirt_diag_vmap_area {
-			unsigned long va_start;		/* +0  */
-			unsigned long va_end;		/* +8  */
-			unsigned long rb_pad[3];	/* +16 (24B) */
-			struct list_head list;		/* +40 (16B) */
-			struct vm_struct *vm;		/* +56 */
-		};
 		unsigned long valist = kln("vmap_area_list");
 		struct list_head *pos;
 		int n = 0;
@@ -231,8 +270,9 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 			for (pos = ((struct list_head *)valist)->next;
 			     pos != (struct list_head *)valist && n < 24;
 			     pos = pos->next, n++) {
-				struct alirt_diag_vmap_area *va =
-					(void *)((unsigned long)pos - 40UL);
+				struct alirt_diag_vmap_area_local *va =
+					(void *)((unsigned long)pos -
+						 ALIRT_DIAG_VA_LIST_OFF);
 				struct vm_struct *vm = va->vm;
 
 				if (!vm) {
@@ -250,6 +290,7 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 			pr_info("alirt: DIAG vmap_area_list unresolved\n");
 		}
 	}
+#undef ALIRT_DIAG_VA_LIST_OFF
 #endif
 
 	return alirt_mm_init_mm ? 0 : -ENOENT;
