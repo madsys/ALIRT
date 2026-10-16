@@ -138,7 +138,6 @@ static inline void *alirt_mod_exit(const struct module *m)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 #  include <linux/fs.h>
 #  include <linux/slab.h>
-#  include <linux/uaccess.h>	/* get_fs/set_fs for alirt_kread fallback */
 /*
  * Fallback name->addr lookup for kernels where the kprobe trick cannot
  * run at all (CONFIG_KPROBES=n - e.g. riscv 5.10, whose arch Kconfig has
@@ -150,31 +149,21 @@ static inline void *alirt_mod_exit(const struct module *m)
  * degrades every cross-check gracefully.
  */
 /*
- * Read wrapper for the parser: kernel_read() refuses f_ops that expose
- * only ->read (procfs seq files such as /proc/kallsyms have no
- * ->read_iter until much later), returning -EINVAL via warn_unsupported
- * since 5.9.  While set_fs() exists (< 5.18), fall back to the classic
- * direct ->read with a kernel buffer, which is exactly what kernel_read
- * itself did before the kvec rework.  On 5.18+ (set_fs removed) only
- * kernel_read remains; the parser then degrades and the caller falls
- * back to the kprobe path.
+ * Read wrapper for the parser.  Since 5.9 __kernel_read refuses f_ops
+ * exposing only ->read (procfs seq files such as /proc/kallsyms have no
+ * ->read_iter), returning -EINVAL via warn_unsupported - so on >= 5.9 the
+ * parser silently yields nothing and the caller's kprobe fallback takes
+ * over.  A direct ->read fallback with set_fs(KERNEL_DS) is NOT
+ * available: by 5.15 no architecture in the test matrix selects
+ * CONFIG_SET_FS (arm64/mips/arm dropped it between 5.10 and 5.15; x86_64,
+ * riscv and powerpc never had it in the 5.x kvec era), and the remaining
+ * arches' access_ok() checks TASK_SIZE unconditionally, so a kernel buffer
+ * would fail copy_to_user anyway.
  */
 static inline ssize_t alirt_kread(struct file *filp, void *buf, size_t count,
 				  loff_t *pos)
 {
-	ssize_t n = kernel_read(filp, buf, count, pos);
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0) && \
-	LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0)
-	if (n == -EINVAL && filp->f_op->read) {
-		mm_segment_t old_fs = get_fs();
-
-		set_fs(KERNEL_DS);
-		n = filp->f_op->read(filp, buf, count, pos);
-		set_fs(old_fs);
-	}
-#endif
-	return n;
+	return kernel_read(filp, buf, count, pos);
 }
 
 static inline unsigned long alirt_ks_lookup(const char *name)
