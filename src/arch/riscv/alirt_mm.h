@@ -167,18 +167,33 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 	 */
 	{
 		unsigned long end_sym = kln("_end");
-		unsigned long floor;
 
-		alirt_mod_start = VMALLOC_START;
 		if (end_sym) {
+			unsigned long floor;
+
+			alirt_mod_start = VMALLOC_START;
 			floor = ((end_sym + PAGE_SIZE - 1) & PAGE_MASK)
 				- ALIRT_RISCV_SZ_2G;
 			if (floor > alirt_mod_start)
 				alirt_mod_start = floor;
-		}
-		alirt_mod_end = alirt_mod_start + ALIRT_RISCV_SZ_2G;
-		if (alirt_mod_end > VMALLOC_END + 1)
+			alirt_mod_end = alirt_mod_start + ALIRT_RISCV_SZ_2G;
+			if (alirt_mod_end > VMALLOC_END + 1)
+				alirt_mod_end = VMALLOC_END + 1;
+		} else {
+			/*
+			 * No _end (symbol resolution unavailable - e.g. riscv
+			 * 5.10 has neither KPROBES nor a readable /proc/kallsyms
+			 * since 5.9's kernel_read restriction): the runtime floor
+			 * PFN_ALIGN(_end) - SZ_2G sits in the TOP of the vmalloc
+			 * area for any realistically sized kernel image, so the
+			 * static top-2GB window is the right conservative guess
+			 * (same fallback as the 4.19 ~ 5.4 branch below; the
+			 * vmalloc bottom is taken by boot-time ioremaps, not
+			 * modules).
+			 */
+			alirt_mod_start = VMALLOC_END + 1 - ALIRT_RISCV_SZ_2G;
 			alirt_mod_end = VMALLOC_END + 1;
+		}
 	}
 # else
 	/*

@@ -219,6 +219,34 @@ out:
 	filp_close(filp, NULL);
 	return addr;
 }
+
+/*
+ * kallsyms_lookup_name-compatible wrapper for the parser path.
+ *
+ * "module_kset" (the 'struct kset *' variable in kernel/module main.c)
+ * never needs the symbol table at all: every loaded module's kobject is
+ * registered in that kset, so our own module carries a live pointer to
+ * the kset VALUE.  Callers resolve the variable (to dereference it
+ * once), so the value is parked in a module-local shadow and the
+ * shadow's ADDRESS is returned instead.  This keeps the module-kset
+ * cross-check alive on kernels where the parser is the only lookup:
+ * riscv 5.10 has no HAVE_KPROBES, no exported kallsyms_lookup_name,
+ * and since 5.9 __kernel_read refuses to open /proc/kallsyms - three
+ * independent dead ends for every other name, but not for this one.
+ */
+static struct kset *alirt_module_kset_shadow;
+
+static inline unsigned long alirt_kln_lookup(const char *name)
+{
+#if defined(CONFIG_MODULES)
+	if (!strcmp(name, "module_kset") && THIS_MODULE &&
+	    THIS_MODULE->mkobj.kobj.kset) {
+		alirt_module_kset_shadow = THIS_MODULE->mkobj.kobj.kset;
+		return (unsigned long)&alirt_module_kset_shadow;
+	}
+#endif
+	return alirt_ks_lookup(name);
+}
 #endif /* >= 5.7 */
 
 /*
@@ -254,7 +282,7 @@ static inline int alirt_resolve_kln(unsigned long (**kln)(const char *name))
 	 * symbol table, which is intact when root inserts the module.
 	 */
 	if (alirt_ks_lookup("kallsyms_lookup_name")) {
-		*kln = alirt_ks_lookup;
+		*kln = alirt_kln_lookup;
 		return 0;
 	}
 #if defined(CONFIG_KPROBES)
@@ -364,11 +392,11 @@ static inline int alirt_resolve_kln(unsigned long (**kln)(const char *name))
 	 * caller degrades.
 	 */
 	if (!*kln)
-		*kln = alirt_ks_lookup;
+		*kln = alirt_kln_lookup;
 	return 0;
 #else
 	/* No KPROBES at all (e.g. riscv 5.10): /proc/kallsyms parser. */
-	*kln = alirt_ks_lookup;
+	*kln = alirt_kln_lookup;
 	return 0;
 #endif
 #endif
