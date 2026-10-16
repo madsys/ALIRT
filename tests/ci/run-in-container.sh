@@ -149,12 +149,15 @@ echo "===== [3/4] Compiling ALIRT modules (src/ layout) ====="
 COMPILE_OK=1
 for tool in mod_hunter process_hunter sock_hunter; do
     KCFLAGS_EXTRA=""
-    if [ "$tool" = "process_hunter" ]; then
+    if [ "$tool" = "process_hunter" ] || [ "$tool" = "sock_hunter" ]; then
         # Cross-gcc/header-era include-order workaround (module sources
         # are frozen): on these combos the SLUB internals that
-        # <linux/slub_def.h> uses are not yet defined when
-        # process_hunter.c reaches it (5.4: memcg_cache_params lives in
-        # the internal mm/slab.h; 6.1: struct slab / slab_address likewise).
+        # <linux/slub_def.h> uses are not yet defined when the tool
+        # reaches it (5.4: memcg_cache_params lives in the internal
+        # mm/slab.h; 6.1: struct slab / slab_address likewise).  Both
+        # process_hunter.c and sock_hunter.c include slub_def.h
+        # (sock_hunter hit it on aarch64 5.4 once process_hunter had the
+        # shim).
         # x86_64 include order satisfies slub_def.h; these combos don't.
         # Pre-include the internal header through a tiny shim — see
         # tests/ci/alirt-slub-shim.h (-I$KDIR/mm exposes mm/slab.h).
@@ -248,9 +251,34 @@ if [ "$RUNTIME" = "true" ]; then
             # TCG has no Transactional Memory: without cap-htm=off the
             # guest dies instantly ("No Transactional Memory support in
             # TCG") and, depending on the kernel's HTM probing, can also
-            # hang the whole boot with zero console output.
-            powerpc) QEMU="qemu-system-ppc64 -M pseries,cap-htm=off"
+            # hang the whole boot with zero console output.  The property
+            # only exists since QEMU 2.10 (era containers ship 2.5/2.11),
+            # where TCG has no TM at all and nothing needs disabling.
+            powerpc) QBIN=qemu-system-ppc64
+                     MACH=pseries
+                     QVER=$($QBIN --version | grep -o 'version [0-9]*\.[0-9]*' | grep -o '[0-9]*\.[0-9]*')
+                     QMAJ=${QVER%%.*}; QMIN=${QVER##*.}
+                     [ "$QMAJ" -gt 2 ] || { [ "$QMAJ" -eq 2 ] && [ "$QMIN" -ge 10 ]; } \
+                         && MACH="$MACH,cap-htm=off"
+                     QEMU="$QBIN -M $MACH"
                      KIMG="$KDIR/arch/powerpc/boot/zImage"
+                     # SLOF in QEMU < 5.0 places the initrd right after
+                     # the *file size* of the loaded kernel image, without
+                     # reserving room for the decompressed kernel; the
+                     # growing kernel image then overwrites the initrd and
+                     # the initramfs unpacker dies on garbage ("invalid
+                     # magic at start of compressed archive"; seen on
+                     # 4.19.325 and 5.4.290).  QEMU 6.x places the initrd
+                     # above the decompressed kernel.  Pad the boot image
+                     # to 128M on old QEMU so the initrd lands clear of
+                     # the decompression window (the wrapper takes the
+                     # real kernel size from its own header and ignores
+                     # the trailing padding).
+                     if [ "$QMAJ" -lt 5 ]; then
+                         cp "$KIMG" /tmp/ppc-zImage
+                         truncate -s 128M /tmp/ppc-zImage
+                         KIMG=/tmp/ppc-zImage
+                     fi
                      CONSOLE="hvc0" ;;
             riscv)   QEMU="qemu-system-riscv64 -M virt"
                      CONSOLE="ttyS0"
@@ -263,27 +291,57 @@ if [ "$RUNTIME" = "true" ]; then
                      # generic OpenSBI from source - the container
                      # already has the riscv64 cross toolchain.
                      if [ "$(printf '%s\n' "5.15" "$KVER" | sort -V | head -n1)" != "5.15" ]; then
-                         ( cd /tmp && curl -fsSL \
-                             https://github.com/riscv-software-src/opensbi/archive/refs/tags/v1.2.tar.gz | tar xz \
-                             && make -C opensbi-1.2 PLATFORM=generic \
-                                  CROSS_COMPILE=riscv64-linux-gnu- -j"$(nproc)" >/dev/null ) \
-                             || { echo "RUNTIME-RESULT: FAIL (opensbi build)"; exit 1; }
-                         QEXTRA="-bios /tmp/opensbi-1.2/build/platform/generic/firmware/fw_jump.bin"
+                         if [ "$(printf '%s\n' "4.20" "$KVER" | sort -V | head -n1)" = "4.20" ]; then
+                             ( cd /tmp && curl -fsSL \
+                                 https://github.com/riscv-software-src/opensbi/archive/refs/tags/v1.2.tar.gz | tar xz \
+                                 && make -C opensbi-1.2 PLATFORM=generic \
+                                      CROSS_COMPILE=riscv64-linux-gnu- -j"$(nproc)" >/dev/null ) \
+                                 || { echo "RUNTIME-RESULT: FAIL (opensbi build)"; exit 1; }
+                             QEXTRA="-bios /tmp/opensbi-1.2/build/platform/generic/firmware/fw_jump.bin"
+                             KIMG="$KDIR/arch/riscv/boot/Image"
+                         else
+                             # v4.19 has no arch/riscv/boot/Image, and the
+                             # era QEMU cannot boot the ELF vmlinux via
+                             # -kernel either ("rom: requested regions
+                             # overlap (rom mrom.reset)": the ELF program
+                             # headers collide with the mrom reset area).
+                             # Wrap the kernel in an OpenSBI fw_payload
+                             # firmware instead: flatten vmlinux with
+                             # objcopy (same recipe the 4.20+ Image target
+                             # uses; riscv vmlinux sections carry physical
+                             # LMAs) and let OpenSBI carry it to
+                             # 0x80200000.  The riscv kernel is medany
+                             # and relocates at runtime via va_pa_offset,
+                             # so the non-default load address is fine.
+                             # No -kernel is passed for this path (KIMG=""
+                             # below); QEMU still hands the initrd through
+                             # the DTB.
+                             riscv64-linux-gnu-objcopy -O binary \
+                                 -R .note -R .comment -R .riscv.attributes \
+                                 "$KDIR/vmlinux" /tmp/rv-kernel.bin \
+                                 || { echo "RUNTIME-RESULT: FAIL (vmlinux flatten)"; exit 1; }
+                             ( cd /tmp && curl -fsSL \
+                                 https://github.com/riscv-software-src/opensbi/archive/refs/tags/v1.2.tar.gz | tar xz \
+                                 && make -C opensbi-1.2 PLATFORM=generic \
+                                      FW_PAYLOAD=y FW_PAYLOAD_PATH=/tmp/rv-kernel.bin \
+                                      FW_PAYLOAD_OFFSET=0x200000 \
+                                      CROSS_COMPILE=riscv64-linux-gnu- -j"$(nproc)" >/dev/null ) \
+                                 || { echo "RUNTIME-RESULT: FAIL (opensbi build)"; exit 1; }
+                             QEXTRA="-bios /tmp/opensbi-1.2/build/platform/generic/firmware/fw_payload.bin"
+                             KIMG=""
+                         fi
                      else
                          # QEMU >= 5.2 loads the bundled OpenSBI
                          # automatically; requesting it explicitly is a
                          # no-op there.
                          QEXTRA="-bios default"
-                     fi
-                     if [ "$(printf '%s\n' "4.20" "$KVER" | sort -V | head -n1)" = "4.20" ]; then
                          KIMG="$KDIR/arch/riscv/boot/Image"
-                     else
-                         # v4.19 has no arch/riscv/boot/Image; boot the
-                         # ELF vmlinux directly (QEMU loads it per its
-                         # program headers, OpenSBI fw_jump goes to
-                         # 0x80200000, the riscv kernel load address).
-                         KIMG="$KDIR/vmlinux"
-                     fi ;;
+                     fi
+                     # The 5.10 guest dies inside OpenSBI before any
+                     # kernel output; an SBI early console will show
+                     # whether the kernel proper is reached.  Old
+                     # kernels ignore the unknown parameter.
+                     QAPPEND="earlycon=sbi" ;;
             *) echo "RUNTIME-RESULT: FAIL (no QEMU mapping for $ARCH)"; exit 1 ;;
         esac
         # TCG emulation is slow (a full defconfig kernel under emulation):
@@ -291,11 +349,13 @@ if [ "$RUNTIME" = "true" ]; then
         # o32 without CONFIG_HIGHMEM, so cap RAM at 512M: a 1G lowmem
         # region can hang the guest before the serial console registers,
         # producing a completely silent boot.
+        # KIMG is empty on the riscv fw_payload path (4.19): the
+        # firmware carries the kernel, so no -kernel is passed.
+        [ -n "$KIMG" ] && KARG="-kernel $KIMG" || KARG=""
         # shellcheck disable=SC2086
-        timeout 420 $QEMU ${QMEM:--m 1G} ${QEXTRA:-} \
-            -kernel "$KIMG" \
+        timeout 420 $QEMU ${QMEM:--m 1G} ${QEXTRA:-} $KARG \
             -initrd /ir.cpio.gz \
-            -append "console=$CONSOLE,115200 loglevel=8 panic=10" \
+            -append "console=$CONSOLE,115200 loglevel=8 panic=10 ${QAPPEND:-}" \
             -nographic -no-reboot 2>&1 | tee /src/vm-console.log
     fi
 
