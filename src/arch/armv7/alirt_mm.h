@@ -104,12 +104,13 @@
 #include <linux/version.h>
 #include <linux/mm.h>
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
 /*
  * Generic pgtable definitions with #ifndef-guarded fallbacks
  * (pte_offset_kernel/pgd_offset/pmd_offset/pud_offset).  ARM's own
- * definitions in asm/pgtable.h win where present (<= v5.4); from v5.8
- * ARM relies on these generic versions.  Includes <asm/pgtable.h>.
+ * definitions in asm/pgtable.h win where present (<= v5.7); from v5.8
+ * (when include/linux/pgtable.h was created) ARM relies on these
+ * generic versions.  Includes <asm/pgtable.h>.
  */
 #  include <linux/pgtable.h>
 #else
@@ -127,8 +128,8 @@
  */
 static struct mm_struct *alirt_mm_init_mm;
 
-/* defined below; the init-time self-test needs the prototype early */
-static inline bool alirt_addr_valid(unsigned long addr, size_t size);
+/* Saved kln pointer for the deferred self-test (alirt_selftest_once). */
+static unsigned long (*alirt_kln_saved)(const char *name);
 
 /*
  * Resolve init_mm through kallsyms.  @kln is a working
@@ -136,30 +137,26 @@ static inline bool alirt_addr_valid(unsigned long addr, size_t size);
  * tolerated).  Returns 0 on success; until then, and on failure,
  * alirt_addr_valid() reports every address as unvalidated.
  *
- * On success, run a one-time self-test: a walk that silently rejects
- * everything is indistinguishable from "nothing in the window", so
- * validate one direct-map address (init_mm itself) and the caller
+ * The one-time self-test is NOT run here: calling alirt_addr_valid()
+ * before its definition needs a forward declaration, and old GCC (<= 7,
+ * the Ubuntu 16.04/18.04 era images in CI) rejects a forward-declared
+ * always_inline function that refers to itself recursively ("inlining
+ * failed in call to always_inline: recursive inlining").  It runs once,
+ * deferred, at the first alirt_modules_start() call instead (see
+ * alirt_selftest_once): a walk that silently rejects everything is
+ * indistinguishable from "nothing in the window", so the probe
+ * validates one direct-map address (init_mm itself) and the caller
  * module's struct module (the module window the scanner sweeps) and
- * complain loudly if either fails.
+ * complains loudly if either fails.
  */
 static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 {
 	if (!kln)
 		return -EINVAL;
 	alirt_mm_init_mm = (struct mm_struct *)kln("init_mm");
-	if (!alirt_mm_init_mm)
-		return -ENOENT;
-	if (!alirt_addr_valid((unsigned long)alirt_mm_init_mm,
-			      sizeof(*alirt_mm_init_mm)))
-		pr_warn("alirt: armv7 addr_valid self-test: init_mm @ %px REJECTED\n",
-			alirt_mm_init_mm);
-#if defined(MODULE) && defined(THIS_MODULE)
-	if (THIS_MODULE &&
-	    !alirt_addr_valid((unsigned long)THIS_MODULE, sizeof(*THIS_MODULE)))
-		pr_warn("alirt: armv7 addr_valid self-test: THIS_MODULE @ %px REJECTED\n",
-			THIS_MODULE);
-#endif
-	return 0;
+	alirt_kln_saved = kln;
+
+	return alirt_mm_init_mm ? 0 : -ENOENT;
 }
 
 /*
@@ -244,6 +241,37 @@ end:
 	return alirt_addr_valid(end_addr + 1, size - (end_addr - addr + 1));
 }
 
+/*
+ * One-shot walker self-test, run from the first alirt_modules_start()
+ * call (immediately before the first real scan; mod_hunter always runs
+ * alirt_mm_init() at module-load time first, so alirt_kln_saved is
+ * set).  Deferred there — instead of inside alirt_mm_init() — because at
+ * that point alirt_addr_valid() is fully defined and no forward
+ * declaration is needed (old GCC rejects the forward-declared recursive
+ * always_inline; see alirt_mm_init).
+ */
+static inline void alirt_selftest_once(unsigned long (*kln)(const char *))
+{
+	static bool alirt_selftest_done;
+
+	if (alirt_selftest_done)
+		return;
+	alirt_selftest_done = true;
+	if (!kln)
+		return;
+
+	if (!alirt_addr_valid((unsigned long)alirt_mm_init_mm,
+			      sizeof(*alirt_mm_init_mm)))
+		pr_warn("alirt: armv7 addr_valid self-test: init_mm @ %px REJECTED\n",
+			alirt_mm_init_mm);
+#if defined(MODULE) && defined(THIS_MODULE)
+	if (THIS_MODULE &&
+	    !alirt_addr_valid((unsigned long)THIS_MODULE, sizeof(*THIS_MODULE)))
+		pr_warn("alirt: armv7 addr_valid self-test: THIS_MODULE @ %px REJECTED\n",
+			THIS_MODULE);
+#endif
+}
+
 #else /* !CONFIG_MMU */
 
 static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
@@ -268,6 +296,10 @@ static inline bool alirt_addr_valid(unsigned long addr, size_t size)
  */
 static inline unsigned long alirt_modules_start(void)
 {
+#ifdef CONFIG_MMU
+	/* First scan about to start: run the deferred walker self-test. */
+	alirt_selftest_once(alirt_kln_saved);
+#endif
 	return MODULES_VADDR;
 }
 

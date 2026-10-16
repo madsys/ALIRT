@@ -72,7 +72,12 @@
  *     raw PMD_TYPE_* bits, which asm/pgtable-hwdef.h defines unguarded
  *     on every version since 3.7.  For CONFIG_PGTABLE_LEVELS <= 2 the
  *     PMD level is folded into the pgd entry, PMD_SHIFT is undefined,
- *     and a block found there spans the whole pgd slot (PGDIR_SHIFT).
+ *     and the raw descriptor test is applied to the folded entry.
+ *     The walker does not compute block spans: a candidate under a block
+ *     descriptor is rejected outright (see alirt_addr_valid — block
+ *     mappings reachable from the scan window translate to nonexistent
+ *     physical memory on KASLR-era kernels, and genuine module mappings
+ *     are always pte-level).
  *
  *  6. Leaf check.  pte_present() exists on every arm64 kernel from 3.7
  *     through 7.2 (it tests PTE_VALID; from 4.4 on it additionally
@@ -115,43 +120,30 @@
  */
 static struct mm_struct *alirt_mm_init_mm;
 
-/* Defined below; exercised by the init-time self-test. */
-static inline bool alirt_addr_valid(unsigned long addr, size_t size);
+/* Saved kln pointer for the deferred self-test (alirt_selftest_once). */
+static unsigned long (*alirt_kln_saved)(const char *name);
 
 /*
  * Resolve init_mm through kallsyms.  @kln is a working
  * kallsyms_lookup_name (see alirt_resolve_kln() in compat.h; NULL is
  * tolerated).  Returns 0 on success; until then, and on failure,
  * alirt_addr_valid() reports every address as unvalidated.
+ *
+ * The init-time walker self-test is NOT run here: calling
+ * alirt_addr_valid() before its definition needs a forward
+ * declaration, and old GCC (<= 7, the Ubuntu 16.04/18.04 era images in
+ * CI) rejects a forward-declared always_inline function that refers to
+ * itself recursively ("inlining failed in call to always_inline
+ * 'alirt_addr_valid': recursive inlining").  It runs once, deferred,
+ * at the first alirt_modules_start() call instead (see
+ * alirt_selftest_once).
  */
 static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 {
-	unsigned long tm, bn, sw;
-	int vim, vtm, vbn;
-
 	if (!kln)
 		return -EINVAL;
 	alirt_mm_init_mm = (struct mm_struct *)kln("init_mm");
-
-	/* Init-time self-test: probe the walker against three known-mapped
-	 * landmarks — init_mm itself (kernel-image .data), our own struct
-	 * module (execmem/module range, KASLR-placed), and linux_banner
-	 * (.rodata) — so a walker that silently rejects everything fails
-	 * loudly here instead of producing an empty scan report.  Quiet
-	 * on success; warns (once) with per-landmark results otherwise. */
-	tm = (unsigned long)THIS_MODULE;
-	bn = kln("linux_banner");
-	sw = kln("swapper_pg_dir");
-	vim = alirt_mm_init_mm ? alirt_addr_valid((unsigned long)alirt_mm_init_mm, 64) : -1;
-	vtm = alirt_addr_valid(tm, 64);
-	vbn = bn ? alirt_addr_valid(bn, 64) : -1;
-	if (!vim || !vtm || (bn && !vbn))
-		pr_warn("alirt: arm64 self-test FAILED: init_mm=%px(valid=%d,"
-			"pgd=%px) this_module=%lx(valid=%d) banner=%lx(valid=%d)"
-			" swapper=%lx\n",
-			alirt_mm_init_mm, vim,
-			alirt_mm_init_mm ? alirt_mm_init_mm->pgd : NULL,
-			tm, vtm, bn, vbn, sw);
+	alirt_kln_saved = kln;
 
 	return alirt_mm_init_mm ? 0 : -ENOENT;
 }
@@ -187,9 +179,18 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 /*
  * Walk the page tables to verify that [addr, addr+size) is fully mapped.
  * Handles every arm64 translation-table shape (2-5 levels, 4K/16K/64K
- * pages, runtime-folded LPA2 tables on 6.x) as well as block mappings
- * at every real level.  Returns false as soon as any intermediate
- * page-table entry is missing.
+ * pages, runtime-folded LPA2 tables on 6.x).  Returns false as soon as
+ * any intermediate page-table entry is missing.
+ *
+ * Block (section) descriptors are rejected, not walked to their end:
+ * the module-space candidates this validates are always pte-mapped
+ * (module_alloc/vmalloc space), while the block mappings reachable from
+ * the scan window — the kernel-image slot on KASLR-era kernels (mapped
+ * with block descriptors whose range extends past the image, observed
+ * on 5.10: a read there takes a synchronous external abort) and vmemmap
+ * holes — translate to nonexistent physical memory that page-table
+ * walking alone cannot detect.  A candidate under a block is therefore
+ * never a genuine module; rejecting it keeps the hunter's deref safe.
  */
 static inline bool alirt_addr_valid(unsigned long addr, size_t size)
 {
@@ -244,12 +245,11 @@ static inline bool alirt_addr_valid(unsigned long addr, size_t size)
 
 	/* p4d-level block (512G, 4K pages + 52-bit VA): only exists when
 	 * the p4d level is real; P4D_SHIFT/P4D_TYPE_* are defined under the
-	 * same CONFIG_PGTABLE_LEVELS > 4 guard in asm/pgtable-hwdef.h. */
+	 * same CONFIG_PGTABLE_LEVELS > 4 guard in asm/pgtable-hwdef.h.
+	 * Blocks are rejected (see the function header). */
 #  if ALIRT_PGTABLE_LEVELS > 4
-	if (unlikely((p4d_val(*p4d) & P4D_TYPE_MASK) == P4D_TYPE_SECT)) {
-		end_addr = (((addr >> P4D_SHIFT) + 1) << P4D_SHIFT) - 1;
-		goto end;
-	}
+	if (unlikely((p4d_val(*p4d) & P4D_TYPE_MASK) == P4D_TYPE_SECT))
+		return false;
 #  endif
 	pud = pud_offset(p4d, addr);
 #else
@@ -261,32 +261,26 @@ static inline bool alirt_addr_valid(unsigned long addr, size_t size)
 		return false;
 
 	/* PUD-level block (1G @4K, 64G @16K): only when the PUD level
-	 * physically exists. */
+	 * physically exists.  Blocks are rejected (function header). */
 #if ALIRT_PGTABLE_LEVELS > 3
-	if (unlikely(alirt_pud_is_block(*pud))) {
-		end_addr = (((addr >> PUD_SHIFT) + 1) << PUD_SHIFT) - 1;
-		goto end;
-	}
+	if (unlikely(alirt_pud_is_block(*pud)))
+		return false;
 #endif
 
 	pmd = pmd_offset(pud, addr);
 	if (unlikely(!pmd) || unlikely(pmd_none(*pmd)))
 		return false;
 
-	/* PMD-level block (2M @4K, 32M @16K, 512M @64K).  With 2-level
-	 * tables the PMD level is folded into the pgd entry and PMD_SHIFT
-	 * is undefined; a block found there (type encoding is
-	 * level-independent) spans the whole pgd slot. */
+	/* PMD-level block (2M @4K, 32M @16K, 512M @64K): rejected, see the
+	 * function header.  With 2-level tables the PMD level is folded
+	 * into the pgd entry; the raw descriptor test is used there (the
+	 * folded level still carries the level-independent type encoding). */
 #if ALIRT_PGTABLE_LEVELS > 2
-	if (unlikely(alirt_pmd_is_block(*pmd))) {
-		end_addr = (((addr >> PMD_SHIFT) + 1) << PMD_SHIFT) - 1;
-		goto end;
-	}
+	if (unlikely(alirt_pmd_is_block(*pmd)))
+		return false;
 #else
-	if (unlikely((pmd_val(*pmd) & PMD_TYPE_MASK) == PMD_TYPE_SECT)) {
-		end_addr = (((addr >> PGDIR_SHIFT) + 1) << PGDIR_SHIFT) - 1;
-		goto end;
-	}
+	if (unlikely((pmd_val(*pmd) & PMD_TYPE_MASK) == PMD_TYPE_SECT))
+		return false;
 #endif
 
 	/* Leaf.  pte_present() exists on every arm64 kernel 3.7-7.2 and
@@ -303,6 +297,46 @@ end:
 		return true;
 
 	return alirt_addr_valid(end_addr + 1, size - (end_addr - addr + 1));
+}
+
+/*
+ * One-shot walker self-test, run from the first alirt_modules_start()
+ * call (immediately before the first real scan).  Deferred there —
+ * instead of running inside alirt_mm_init() — because at that point
+ * alirt_addr_valid() is fully defined and no forward declaration is
+ * needed (old GCC rejects the forward-declared recursive always_inline;
+ * see alirt_mm_init).  Probes the walker against three known-mapped
+ * landmarks — init_mm itself (kernel-image .data), our own struct
+ * module (execmem/module range, KASLR-placed), and linux_banner
+ * (.rodata) — so a walker that silently rejects everything fails loudly
+ * here instead of producing an empty scan report.  Quiet on success;
+ * warns (once) with per-landmark results otherwise.
+ */
+static inline void alirt_selftest_once(unsigned long (*kln)(const char *))
+{
+	static bool alirt_selftest_done;
+	unsigned long tm, bn, sw;
+	int vim, vtm, vbn;
+
+	if (alirt_selftest_done)
+		return;
+	alirt_selftest_done = true;
+	if (!kln)
+		return;
+
+	tm = (unsigned long)THIS_MODULE;
+	bn = kln("linux_banner");
+	sw = kln("swapper_pg_dir");
+	vim = alirt_mm_init_mm ? alirt_addr_valid((unsigned long)alirt_mm_init_mm, 64) : -1;
+	vtm = alirt_addr_valid(tm, 64);
+	vbn = bn ? alirt_addr_valid(bn, 64) : -1;
+	if (!vim || !vtm || (bn && !vbn))
+		pr_warn("alirt: arm64 self-test FAILED: init_mm=%px(valid=%d,"
+			"pgd=%px) this_module=%lx(valid=%d) banner=%lx(valid=%d)"
+			" swapper=%lx\n",
+			alirt_mm_init_mm, vim,
+			alirt_mm_init_mm ? alirt_mm_init_mm->pgd : NULL,
+			tm, vtm, bn, vbn, sw);
 }
 
 /* arm64 module mapping space.
@@ -337,6 +371,9 @@ end:
 static inline unsigned long alirt_modules_start(void)
 {
 	unsigned long tm = (unsigned long)THIS_MODULE;
+
+	/* First scan about to start: run the deferred walker self-test. */
+	alirt_selftest_once(alirt_kln_saved);
 	return tm ? tm - (1UL << 30) : MODULES_VADDR;
 }
 
