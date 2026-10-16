@@ -36,7 +36,16 @@ case "$ARCH" in
              else
                  DEFCFG=ppc64_defconfig; PPC_OLD_LE=1
              fi ;;
-    riscv)   KARCH=riscv;   CROSS="riscv64-linux-gnu-";     IMG=Image;   DEFCFG=defconfig ;;
+    riscv)   KARCH=riscv;   CROSS="riscv64-linux-gnu-";     DEFCFG=defconfig
+             # arch/riscv/boot/ (the Image target) only exists from v4.20;
+             # v4.19 has no arch/riscv/boot/Makefile ("No rule to make
+             # target 'Image'"), so build the ELF vmlinux there and boot
+             # it directly under QEMU (see run-in-container.sh).
+             if [ "$(printf '%s\n' "4.20" "$KVER" | sort -V | head -n1)" = "4.20" ]; then
+                 IMG=Image
+             else
+                 IMG=vmlinux
+             fi ;;
     *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
@@ -54,6 +63,10 @@ make ARCH="$KARCH" CROSS_COMPILE="$CROSS" "$DEFCFG" >/dev/null
 # scripts/config + olddefconfig enables the option on every architecture;
 # if an arch does not define the symbol, olddefconfig silently drops the
 # orphan line and the build proceeds.
+# ALIRT builds exclusively as loadable modules; multi_v7_defconfig on
+# 3.10 ships CONFIG_MODULES=n ("The present kernel configuration has
+# modules disabled"), which makes the modules target a hard error.
+./scripts/config --enable MODULES
 ./scripts/config --enable KALLSYMS_ALL
 # ALIRT resolves kallsyms_lookup_name via the kprobe trick on >= 5.7
 # (see alirt_resolve_kln() in compat.h); without CONFIG_KPROBES that
@@ -61,11 +74,33 @@ make ARCH="$KARCH" CROSS_COMPILE="$CROSS" "$DEFCFG" >/dev/null
 # the init_mm-dependent address validation degrade.  The cross-arch
 # defconfigs ship KPROBES=n, so force it on like KALLSYMS_ALL.
 ./scripts/config --enable KPROBES
+if [ "$KARCH" = "mips" ]; then
+    # process_hunter.c requires CONFIG_SLUB (compile-time #error in its
+    # SLUB path, source frozen); malta_defconfig still selects
+    # CONFIG_SLAB on 4.4-5.15 (only 6.1+ switched to SLUB).  Swap the
+    # SLAB choice for SLUB there; scripts/config + olddefconfig lets
+    # the y-member win the choice.
+    ./scripts/config --disable SLAB --enable SLUB
+    if [ "$(printf '%s\n' "3.11" "$KVER" | sort -V | head -n1)" != "3.11" ]; then
+        # binutils >= 2.26 rejects ldc1/sdc1 under o32's default FP32 mode
+        # even with .set mips3 ("opcode not supported on this processor:
+        # mips3 'sdc1'...") in arch/mips/kernel/r4k_fpu.S, which uses the
+        # instructions unconditionally.  The instruction encoding is
+        # FR-mode-agnostic, so telling the assembler FP64 mode changes no
+        # output bytes vs the era toolchains that accepted the file.
+        sed -i 's/^\t\.set\tmips3$/\t.set\tmips3\n\t.set\tfp=64/' \
+            arch/mips/kernel/r4k_fpu.S
+    fi
+fi
+# gcc-9 vs the 5.10 nfsd code trips a clamp() compiletime_assert in
+# fs/nfsd/nfs4state.c; nothing in ALIRT needs the NFS server.
+./scripts/config --disable NFSD
 if [ "${PPC_OLD_LE:-0}" = "1" ]; then
     ./scripts/config --enable CPU_LITTLE_ENDIAN
 fi
 make ARCH="$KARCH" CROSS_COMPILE="$CROSS" olddefconfig >/dev/null
-# Note: the kernel image target differs per arch (x86=bzImage, arm64=Image, riscv=Image)
+# Note: the kernel image target differs per arch (x86=bzImage, arm64=Image,
+# riscv=Image on 4.20+, vmlinux on 4.19, mips=vmlinux)
 make -j"$(nproc)" ARCH="$KARCH" CROSS_COMPILE="$CROSS" "$IMG" modules >/dev/null
 
 echo "Kernel build finished: $(pwd)"
