@@ -135,6 +135,74 @@ static inline void *alirt_mod_exit(const struct module *m)
 #  define ALIRT_KALLSYMS_NEEDS_KPROBE 1
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+#  include <linux/fs.h>
+#  include <linux/slab.h>
+/*
+ * Fallback name->addr lookup for kernels where the kprobe trick cannot
+ * run at all (CONFIG_KPROBES=n - e.g. riscv 5.10, whose arch Kconfig has
+ * no HAVE_KPROBES and therefore cannot enable KPROBES): parse
+ * /proc/kallsyms.  Requires the reader to hold CAP_SYSLOG (root) or
+ * kptr_restrict zeroes every address; insmod in the runtime test (and
+ * forensic practice) runs as root.  Slow - a full table scan per lookup -
+ * but only a handful of lookups run at module init, and a zero result
+ * degrades every cross-check gracefully.
+ */
+static inline unsigned long alirt_ks_lookup(const char *name)
+{
+	struct file *filp;
+	char *tmp, *line;
+	unsigned long addr = 0;
+	loff_t pos = 0;
+	ssize_t n;
+
+	filp = filp_open("/proc/kallsyms", O_RDONLY, 0);
+	if (IS_ERR(filp))
+		return 0;
+	tmp = kmalloc(1024, GFP_KERNEL);
+	line = kmalloc(1024, GFP_KERNEL);
+	if (!tmp || !line) {
+		kfree(tmp);
+		kfree(line);
+		filp_close(filp, NULL);
+		return 0;
+	}
+	{
+		size_t llen = 0;
+
+		while ((n = kernel_read(filp, tmp, 1024, &pos)) > 0) {
+			ssize_t i;
+
+			for (i = 0; i < n; i++) {
+				if (tmp[i] == '\n') {
+					unsigned long a;
+					char type;
+					char nm[512];
+
+					line[llen] = '\0';
+					if (sscanf(line, "%lx %c %511s",
+						   &a, &type, nm) == 3 &&
+					    strcmp(nm, name) == 0) {
+						addr = a;
+						goto out;
+					}
+					llen = 0;
+				} else if (llen < 1023) {
+					line[llen++] = tmp[i];
+				} else {
+					llen = 0; /* oversized line: drop */
+				}
+			}
+		}
+	}
+out:
+	kfree(tmp);
+	kfree(line);
+	filp_close(filp, NULL);
+	return addr;
+}
+#endif /* >= 5.7 */
+
 /*
  * Resolve kallsyms_lookup_name itself. Returns 0 and sets *kln on
  * success; returns a negative errno and leaves *kln NULL on failure.
@@ -235,11 +303,12 @@ static inline int alirt_resolve_kln(unsigned long (**kln)(const char *name))
 			*kln = (unsigned long (*)(const char *name))ge;
 		} else {
 			/* No match: never call the unverified kp.addr (that is
-			 * the crash this scan exists to prevent).  Clear *kln
-			 * so the caller degrades gracefully, and log the
-			 * surrounding words - toolchains occasionally emit a
-			 * different global-entry shape, and the exact bytes
-			 * decide what the scan must accept next. */
+			 * the crash this scan exists to prevent).  *kln is
+			 * cleared here; the caller-visible fallback to the
+			 * /proc/kallsyms parser happens after unregister.
+			 * Log the surrounding words - toolchains occasionally
+			 * emit a different global-entry shape, and the exact
+			 * bytes decide what the scan must accept next. */
 			char buf[160];
 			int n, j;
 
@@ -255,9 +324,20 @@ static inline int alirt_resolve_kln(unsigned long (**kln)(const char *name))
 	}
 #endif
 	unregister_kprobe(&kp);
-	return *kln ? 0 : -ENOENT;
+	/*
+	 * kprobe path ran but no usable entry point came out of it (or the
+	 * ppc64 prologue scan failed): fall back to the /proc/kallsyms
+	 * parser rather than leaving the caller without any lookup.  When
+	 * even that is unavailable (no root), *kln stays NULL and the
+	 * caller degrades.
+	 */
+	if (!*kln)
+		*kln = alirt_ks_lookup;
+	return 0;
 #else
-	return -ENODEV;
+	/* No KPROBES at all (e.g. riscv 5.10): /proc/kallsyms parser. */
+	*kln = alirt_ks_lookup;
+	return 0;
 #endif
 }
 
