@@ -17,6 +17,10 @@ traces can still be detected when programs are launched from a trusted medium;
 without requiring a system shutdown for forensics. It fully covers the “online but 
 not pre-installed” gap in the “online-offline” spectrum.
 
+Supports the following architectures:
+- **x86_64: (kernel 3.10 - 7.2)**
+- **ARMv7, AArch64 (ARM64), MIPS(o32), PowerPC (ppc64le/ppc64), RISC-V (rv64)**
+
 It's useful when you want to know what
 evil kernel backdoor is still resident on your broken system and what the hell
 it is. ALIRT consists of 5 useful tools:
