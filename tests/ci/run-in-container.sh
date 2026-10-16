@@ -148,7 +148,7 @@ kmake() {
 echo "===== [3/4] Compiling ALIRT modules (src/ layout) ====="
 COMPILE_OK=1
 for tool in mod_hunter process_hunter sock_hunter; do
-    PH_KCFLAGS=()
+    KCFLAGS_EXTRA=""
     if [ "$tool" = "process_hunter" ]; then
         # Cross-gcc/header-era include-order workaround (module sources
         # are frozen): on these combos the SLUB internals that
@@ -160,10 +160,20 @@ for tool in mod_hunter process_hunter sock_hunter; do
         # tests/ci/alirt-slub-shim.h (-I$KDIR/mm exposes mm/slab.h).
         case "$ARCH:$KVER" in
             aarch64:5.4.*|powerpc:5.4.*|powerpc:6.1.*)
-                PH_KCFLAGS=(KCFLAGS="-I/src/tests/ci -I$KDIR/mm -include alirt-slub-shim.h") ;;
+                KCFLAGS_EXTRA="-I/src/tests/ci -I$KDIR/mm -include alirt-slub-shim.h" ;;
         esac
     fi
-    if kmake "M=/src/src/$tool" ${PH_KCFLAGS[@]+"${PH_KCFLAGS[@]}"}; then
+    if [ "$NEED_ALIGN" = "yes" ]; then
+        # binutils gained objcopy --set-section-alignment only in 2.39,
+        # so align_modstruct() below silently no-ops on every era image
+        # up to 22.04 (it only warns).  Ask gcc for 16-byte variable
+        # alignment instead: the loader then places struct module on a
+        # scanned offset regardless of the objcopy tweak.
+        KCFLAGS_EXTRA="$KCFLAGS_EXTRA -falign-variables=16"
+    fi
+    KM_EXTRA=()
+    [ -n "$KCFLAGS_EXTRA" ] && KM_EXTRA=("KCFLAGS=$KCFLAGS_EXTRA")
+    if kmake "M=/src/src/$tool" ${KM_EXTRA[@]+"${KM_EXTRA[@]}"}; then
         if [ "$NEED_ALIGN" = "yes" ] && [ "$tool" = "mod_hunter" ]; then
             align_modstruct "/src/src/$tool/$tool.ko"
         fi
@@ -184,8 +194,12 @@ fi
 
 if [ "$RUNTIME" = "true" ]; then
     echo "===== [4/4] QEMU runtime detection test ====="
-    # Build the self-hiding sample module
-    kmake M=/src/tests/samples \
+    # Build the self-hiding sample module (same alignment flag as above)
+    SAMPLE_KCFLAGS=()
+    if [ "$NEED_ALIGN" = "yes" ]; then
+        SAMPLE_KCFLAGS=("KCFLAGS=-falign-variables=16")
+    fi
+    kmake M=/src/tests/samples ${SAMPLE_KCFLAGS[@]+"${SAMPLE_KCFLAGS[@]}"} \
         || { echo "RUNTIME-RESULT: FAIL (sample build)"; exit 1; }
     if [ "$NEED_ALIGN" = "yes" ]; then
         for ko in /src/tests/samples/*.ko; do
@@ -252,20 +266,34 @@ if [ "$RUNTIME" = "true" ]; then
                      CONSOLE="hvc0" ;;
             riscv)   QEMU="qemu-system-riscv64 -M virt"
                      CONSOLE="ttyS0"
-                     # The kernel needs SBI for its console and timer; the
-                     # guest boots M-mode into nowhere and stays silent
-                     # without OpenSBI (observed on 20.04's QEMU 4.2:
-                     # "No -bios option specified.  Not loading a
-                     # firmware.").  QEMU >= 5.2 loads the bundled OpenSBI
-                     # automatically; request it explicitly everywhere
-                     # (harmless where it is already the default).
-                     QEXTRA="-bios default"
+                     # The kernel needs SBI for its console and timer;
+                     # without OpenSBI the guest boots M-mode into
+                     # nowhere and stays silent.  The era images have
+                     # no bundled firmware at all (QEMU 3.1/4.2 die
+                     # with "Unable to load the RISC-V firmware
+                     # opensbi-riscv64-virt-fw_jump.bin"), so build a
+                     # generic OpenSBI from source - the container
+                     # already has the riscv64 cross toolchain.
+                     if [ "$(printf '%s\n' "5.15" "$KVER" | sort -V | head -n1)" != "5.15" ]; then
+                         ( cd /tmp && curl -fsSL \
+                             https://github.com/riscv-software-src/opensbi/archive/refs/tags/v1.2.tar.gz | tar xz \
+                             && make -C opensbi-1.2 PLATFORM=generic \
+                                  CROSS_COMPILE=riscv64-linux-gnu- -j"$(nproc)" >/dev/null ) \
+                             || { echo "RUNTIME-RESULT: FAIL (opensbi build)"; exit 1; }
+                         QEXTRA="-bios /tmp/opensbi-1.2/build/platform/generic/firmware/fw_jump.bin"
+                     else
+                         # QEMU >= 5.2 loads the bundled OpenSBI
+                         # automatically; requesting it explicitly is a
+                         # no-op there.
+                         QEXTRA="-bios default"
+                     fi
                      if [ "$(printf '%s\n' "4.20" "$KVER" | sort -V | head -n1)" = "4.20" ]; then
                          KIMG="$KDIR/arch/riscv/boot/Image"
                      else
-                         # v4.19 has no arch/riscv/boot/Image; boot the ELF
-                         # vmlinux directly (QEMU loads it per its program
-                         # headers and OpenSBI jumps to its entry).
+                         # v4.19 has no arch/riscv/boot/Image; boot the
+                         # ELF vmlinux directly (QEMU loads it per its
+                         # program headers, OpenSBI fw_jump goes to
+                         # 0x80200000, the riscv kernel load address).
                          KIMG="$KDIR/vmlinux"
                      fi ;;
             *) echo "RUNTIME-RESULT: FAIL (no QEMU mapping for $ARCH)"; exit 1 ;;

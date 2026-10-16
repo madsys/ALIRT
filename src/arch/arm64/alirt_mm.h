@@ -177,22 +177,24 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 #endif
 
 /*
- * Walk the page tables to verify that [addr, addr+size) is fully mapped.
- * Handles every arm64 translation-table shape (2-5 levels, 4K/16K/64K
- * pages, runtime-folded LPA2 tables on 6.x).  Returns false as soon as
- * any intermediate page-table entry is missing.
+ * Walk the page tables for the single page containing @addr.  Handles
+ * every arm64 translation-table shape (2-5 levels, 4K/16K/64K pages,
+ * runtime-folded LPA2 tables on 6.x); on success stores the first
+ * address past that page in *@next and returns true, and returns false
+ * as soon as any intermediate page-table entry is missing.
  *
  * Block (section) descriptors are rejected, not walked to their end:
  * the module-space candidates this validates are always pte-mapped
  * (module_alloc/vmalloc space), while the block mappings reachable from
  * the scan window — the kernel-image slot on KASLR-era kernels (mapped
  * with block descriptors whose range extends past the image, observed
- * on 5.10: a read there takes a synchronous external abort) and vmemmap
- * holes — translate to nonexistent physical memory that page-table
- * walking alone cannot detect.  A candidate under a block is therefore
- * never a genuine module; rejecting it keeps the hunter's deref safe.
+ * on 5.10: a read there takes a synchronous external abort) and
+ * vmemmap holes — translate to nonexistent physical memory that
+ * page-table walking alone cannot detect.  A candidate under a block
+ * is therefore never a genuine module; rejecting it keeps the hunter's
+ * deref safe.
  */
-static inline bool alirt_addr_valid(unsigned long addr, size_t size)
+static inline bool alirt_page_mapped(unsigned long addr, unsigned long *next)
 {
 	pgd_t *pgd;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
@@ -201,7 +203,6 @@ static inline bool alirt_addr_valid(unsigned long addr, size_t size)
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
-	unsigned long end_addr;
 
 	/* Kernel threads have current->mm == NULL; the kernel address
 	 * space is identical for every mm, so use init_mm (swapper_pg_dir).
@@ -290,13 +291,32 @@ static inline bool alirt_addr_valid(unsigned long addr, size_t size)
 	if (unlikely(!pte) || unlikely(!pte_present(*pte)))
 		return false;
 
-	end_addr = (((addr >> PAGE_SHIFT) + 1) << PAGE_SHIFT) - 1;
+	*next = (addr & PAGE_MASK) + PAGE_SIZE;
+	return true;
+}
 
-end:
-	if (end_addr >= addr + size - 1)
-		return true;
+/*
+ * Verify that [addr, addr+size) is fully mapped.  Iterates page by page
+ * through alirt_page_mapped(); expressed as a loop rather than tail
+ * recursion because old GCC (<= 7, the Ubuntu 16.04/18.04 era CI
+ * images) rejects recursive always_inline functions outright
+ * ("inlining failed in call to always_inline 'alirt_page_mapped':
+ * recursive inlining") even when the recursive call sits inside the
+ * function's own complete definition (observed on aarch64 4.4 with gcc
+ * 5.4).
+ */
+static inline bool alirt_addr_valid(unsigned long addr, size_t size)
+{
+	unsigned long end = addr + size;
 
-	return alirt_addr_valid(end_addr + 1, size - (end_addr - addr + 1));
+	while (addr < end) {
+		unsigned long next;
+
+		if (!alirt_page_mapped(addr, &next) || next <= addr)
+			return false;
+		addr = next;
+	}
+	return true;
 }
 
 /*

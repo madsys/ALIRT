@@ -176,13 +176,15 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 #endif
 
 /*
- * Walk the page tables to verify that [addr, addr+size) is fully mapped.
- * Handles both ARM MMU configurations - classic 2-level (section
- * mappings at the pmd level) and LPAE 3-level (2MB block mappings) -
- * as well as pte-level mappings (vmalloc/module space).  Returns false
- * as soon as any intermediate page-table entry is missing.
+ * Walk the page tables for the single page containing @addr.  Handles
+ * both ARM MMU configurations - classic 2-level (section mappings at
+ * the pmd level) and LPAE 3-level (2MB block mappings) - as well as
+ * pte-level mappings (vmalloc/module space).  On success stores the
+ * first address past the covered range (page, or section/block for
+ * leaf descriptors) in *@next and returns true; returns false as soon
+ * as any intermediate page-table entry is missing.
  */
-static inline bool alirt_addr_valid(unsigned long addr, size_t size)
+static inline bool alirt_page_mapped(unsigned long addr, unsigned long *next)
 {
 	pgd_t *pgd;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 5, 0)
@@ -191,7 +193,6 @@ static inline bool alirt_addr_valid(unsigned long addr, size_t size)
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
-	unsigned long end_addr;
 
 	/* Unresolvable init_mm (see alirt_mm_init): fail safe, never
 	 * walk a NULL mm. */
@@ -224,22 +225,40 @@ static inline bool alirt_addr_valid(unsigned long addr, size_t size)
 	 * 0b11 LPAE and never match).
 	 */
 	if ((pmd_val(*pmd) & PMD_TYPE_MASK) == PMD_TYPE_SECT) {
-		end_addr = (addr & ~(ALIRT_PMD_LEAF_SIZE - 1)) +
-			   ALIRT_PMD_LEAF_SIZE - 1;
-		goto end;
+		*next = (addr & ~(ALIRT_PMD_LEAF_SIZE - 1)) +
+			ALIRT_PMD_LEAF_SIZE;
+		return true;
 	}
 
 	pte = pte_offset_kernel(pmd, addr);
 	if (unlikely(!pte) || unlikely(!pte_present(*pte)))
 		return false;
 
-	end_addr = (((addr >> PAGE_SHIFT) + 1) << PAGE_SHIFT) - 1;
+	*next = (addr & PAGE_MASK) + PAGE_SIZE;
+	return true;
+}
 
-end:
-	if (end_addr >= addr + size - 1)
-		return true;
+/*
+ * Verify that [addr, addr+size) is fully mapped.  Iterates page by
+ * page through alirt_page_mapped(); expressed as a loop rather than
+ * tail recursion because old GCC (<= 7, the Ubuntu 16.04/18.04 era CI
+ * images) rejects recursive always_inline functions outright
+ * ("inlining failed in call to always_inline: recursive inlining"),
+ * even when the recursive call sits inside the function's own complete
+ * definition (same failure as the arm64 layer).
+ */
+static inline bool alirt_addr_valid(unsigned long addr, size_t size)
+{
+	unsigned long end = addr + size;
 
-	return alirt_addr_valid(end_addr + 1, size - (end_addr - addr + 1));
+	while (addr < end) {
+		unsigned long next;
+
+		if (!alirt_page_mapped(addr, &next) || next <= addr)
+			return false;
+		addr = next;
+	}
+	return true;
 }
 
 /*
