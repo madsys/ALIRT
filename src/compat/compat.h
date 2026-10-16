@@ -174,55 +174,80 @@ static inline int alirt_resolve_kln(unsigned long (**kln)(const char *name))
 	*kln = (unsigned long (*)(const char *name))kp.addr;
 #if defined(CONFIG_PPC64) && defined(CONFIG_PPC64_ELF_ABI_V2)
 	/*
-	 * ppc64 ELFv2: kprobe_lookup_name() hands back either the function's
-	 * LOCAL entry point (ppc_function_entry() skips the global entry) or,
-	 * with CONFIG_KPROBES_ON_FTRACE, the ftrace site - which livepatch.h
-	 * guarantees to lie within the first 16 bytes of the function, i.e.
-	 * right after the -mprofile-kernel fentry stub.  Calling such an
-	 * address directly runs the callee with the *caller's* TOC in r2 (a
-	 * module's TOC lives in the module allocation), so the first
-	 * TOC-relative load faults - seen in practice as a data-access oops
-	 * inside kallsyms code with r2 pointing into the vmalloc area.
+	 * ppc64 ELFv2: kprobe_lookup_name() (arch/powerpc/kernel/kprobes.c)
+	 * hands back any of three values:
+	 *   - the LOCAL entry point  (ppc_function_entry() skipping the GE),
+	 *   - the ftrace site        (with CONFIG_KPROBES_ON_FTRACE; the
+	 *     ftrace location of the -mprofile-kernel stub, which can sit
+	 *     BEFORE the TOC-setup prologue), or
+	 *   - the GLOBAL entry itself.
+	 * Calling any address that is not the global-entry prologue runs the
+	 * callee with the *caller's* TOC in r2 (a module's TOC lives in the
+	 * module allocation), so the first TOC-relative load dereferences
+	 * garbage - seen in practice as a data-access oops inside kallsyms
+	 * code (kallsyms_lookup_name+0x30, DAR in the vmalloc range).
 	 *
 	 * The global entry is the fixed two-instruction prologue
 	 *   addis r2,r12,<toc-8+0x8000>@ha   (0x3C4Cxxxx; linker may use
 	 *                                     lis r2,  0x3C40xxxx)
 	 *   addi  r2,r2,<toc-8>&0xffff       (0x3842xxxx)
 	 * exactly as ppc_function_entry() in asm/code-patching.h identifies
-	 * it (OP_RT_RA_MASK = 0xffff0000).  kp.addr is GE+8 (local entry)
-	 * or at most GE+16 (ftrace site), so a scan window reaching 24
-	 * bytes back from kp.addr always covers the prologue.  r12 is loaded
-	 * with the target address by the caller-side indirect-call sequence,
-	 * so calling the GE re-establishes the kernel TOC on entry.
+	 * it (OP_RT_RA_MASK = 0xffff0000).  It is self-relative to r12 (the
+	 * indirect-call sequence loads r12 with the target address), so the
+	 * prologue instruction pair is itself a valid entry point wherever it
+	 * sits.  Scan BOTH directions around kp.addr: backward covers the
+	 * local-entry case (prologue at kp.addr-8), forward covers the ftrace
+	 * site inside the fentry stub (prologue after the stub, up to 56
+	 * bytes ahead).  Backward matches win; when nothing matches, refuse
+	 * to call the unresolved address instead of crashing the machine.
 	 */
 	{
 		unsigned long a = (unsigned long)*kln & ~3UL;
-		unsigned long lo = a >= 24 ? a - 24 : 0;
-		unsigned long cand;
+		unsigned long lo = a >= 32 ? a - 32 : 0;
+		unsigned long ge = 0;
+		long cand;
 
-		for (cand = lo; cand + 8 <= a + 8; cand += 4) {
+		for (cand = (long)a; cand >= (long)lo; cand -= 4) {
 			unsigned int i0 = *(unsigned int *)cand;
 			unsigned int i1 = *(unsigned int *)(cand + 4);
 
 			if (((i0 & 0xFFFF0000u) == 0x3C4C0000u ||   /* addis r2,r12 */
 			     (i0 & 0xFFFF0000u) == 0x3C400000u) &&  /* lis   r2   */
-			    (i1 & 0xFFFF0000u) == 0x38420000u)     /* addi  r2,r2 */
+			    (i1 & 0xFFFF0000u) == 0x38420000u) {  /* addi  r2,r2 */
+				ge = (unsigned long)cand;
 				break;
+			}
 		}
-		if (cand + 8 <= a + 8) {
-			*kln = (unsigned long (*)(const char *name))cand;
+		if (!ge) {
+			for (cand = (long)a + 4; cand <= (long)a + 56; cand += 4) {
+				unsigned int i0 = *(unsigned int *)cand;
+				unsigned int i1 = *(unsigned int *)(cand + 4);
+
+				if (((i0 & 0xFFFF0000u) == 0x3C4C0000u ||
+				     (i0 & 0xFFFF0000u) == 0x3C400000u) &&
+				    (i1 & 0xFFFF0000u) == 0x38420000u) {
+					ge = (unsigned long)cand;
+					break;
+				}
+			}
+		}
+		if (ge) {
+			*kln = (unsigned long (*)(const char *name))ge;
 		} else {
-			/* No match: leave kp.addr as-is, but log the surrounding
-			 * words - toolchains occasionally emit a different
-			 * global-entry shape, and the exact bytes decide what
-			 * the scan must accept next. */
-			char buf[192];
+			/* No match: never call the unverified kp.addr (that is
+			 * the crash this scan exists to prevent).  Clear *kln
+			 * so the caller degrades gracefully, and log the
+			 * surrounding words - toolchains occasionally emit a
+			 * different global-entry shape, and the exact bytes
+			 * decide what the scan must accept next. */
+			char buf[160];
 			int n, j;
 
+			*kln = NULL;
 			n = scnprintf(buf, sizeof(buf),
 				      "alirt: ppc64 GE scan: no entry prologue near %px; words:",
 				      (void *)a);
-			for (j = -24; j <= 12 && n < (int)sizeof(buf) - 10; j += 4)
+			for (j = -16; j <= 32 && n < (int)sizeof(buf) - 10; j += 4)
 				n += scnprintf(buf + n, sizeof(buf) - n, " %08x",
 					       *(unsigned int *)(a + j));
 			pr_warn("%s\n", buf);
