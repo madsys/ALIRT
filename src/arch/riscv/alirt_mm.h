@@ -109,6 +109,9 @@
  */
 static struct mm_struct *alirt_mm_init_mm;
 
+/* Defined below; alirt_mm_init() self-tests the mm fallback through it. */
+static inline bool alirt_addr_valid(unsigned long addr, size_t size);
+
 /*
  * Module mapping space, filled in by alirt_mm_init().  Zero (empty
  * range) until then - alirt_is_module_space() is simply false, which
@@ -130,6 +133,35 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 	if (!kln)
 		return -EINVAL;
 	alirt_mm_init_mm = (struct mm_struct *)kln("init_mm");
+	if (!alirt_mm_init_mm) {
+		/*
+		 * init_mm is a KALLSYMS_ALL-only data symbol and can be
+		 * unresolvable (riscv 5.10 has no HAVE_KPROBES, and >= 5.9
+		 * kernel_read cannot open /proc/kallsyms).  Every mm's
+		 * kernel half is identical - a user task's own page table
+		 * must translate kernel addresses, that is how kernel
+		 * faults in syscall context are serviced - so the current
+		 * mm is a valid substitute for the walk.  Gate the
+		 * substitution on the THIS_MODULE self-test: if this mm's
+		 * kernel half cannot map our own struct module, stay
+		 * unvalidated rather than walk a foreign layout.
+		 */
+		struct mm_struct *mm = current->active_mm;
+
+		if (mm) {
+			alirt_mm_init_mm = mm;
+#if defined(MODULE) && defined(THIS_MODULE)
+			if (THIS_MODULE &&
+			    !alirt_addr_valid((unsigned long)THIS_MODULE,
+					      sizeof(*THIS_MODULE)))
+				alirt_mm_init_mm = NULL;
+			else
+#endif
+				pr_warn("alirt: riscv init_mm unresolvable; "
+					"using current->active_mm for the "
+					"kernel-half walk\n");
+		}
+	}
 
 #if defined(CONFIG_64BIT)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0)

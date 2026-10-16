@@ -239,8 +239,7 @@ static struct kset *alirt_module_kset_shadow;
 static inline unsigned long alirt_kln_lookup(const char *name)
 {
 #if defined(CONFIG_MODULES)
-	if (!strcmp(name, "module_kset") && THIS_MODULE &&
-	    THIS_MODULE->mkobj.kobj.kset) {
+	if (!strcmp(name, "module_kset") && THIS_MODULE->mkobj.kobj.kset) {
 		alirt_module_kset_shadow = THIS_MODULE->mkobj.kobj.kset;
 		return (unsigned long)&alirt_module_kset_shadow;
 	}
@@ -272,6 +271,25 @@ static inline int alirt_resolve_kln(unsigned long (**kln)(const char *name))
 	*kln = kallsyms_lookup_name;
 	return 0;
 #else
+#if defined(CONFIG_PPC64) && defined(CONFIG_PPC64_ELF_ABI_V2)
+	/*
+	 * ppc64 ELFv2 >= 5.7: skip the kprobe path entirely - it resolves
+	 * an address that is not safe to CALL from a module (observed
+	 * oops inside kallsyms_lookup_name at +0x30 on 5.15.180 and
+	 * +0x44 on 5.10.271, both with the module TOC still in r2: with
+	 * KPROBES_ON_FTRACE kp.addr is the ftrace site, and no global
+	 * entry scan around it produces a callable prologue).  The
+	 * parser-wrapper below never calls kernel text.  On >= 5.9 its
+	 * /proc/kallsyms reads fail too (no set_fs on this arch in the
+	 * kvec era), but alirt_kln_lookup still resolves module_kset from
+	 * our own module's kobject, and the kset cross-check alone
+	 * yields HIGH/CRITICAL verdicts; the arch mm layer substitutes
+	 * current->mm when init_mm is unresolvable.  Nothing the kprobe
+	 * path could add is reachable without crashing first.
+	 */
+	*kln = alirt_kln_lookup;
+	return 0;
+#endif
 	/*
 	 * >= 5.7: prefer the /proc/kallsyms parser whenever it works.  The
 	 * kprobe path below is broken on ppc64 ELFv2 in a way no prologue

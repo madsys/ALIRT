@@ -120,6 +120,35 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 	if (!kln)
 		return -EINVAL;
 	alirt_mm_init_mm = (struct mm_struct *)kln("init_mm");
+	if (!alirt_mm_init_mm) {
+		/*
+		 * init_mm is a KALLSYMS_ALL-only data symbol and can be
+		 * unresolvable (ppc64 >= 5.7 has no callable
+		 * kallsyms_lookup_name; see alirt_resolve_kln).  Every
+		 * mm's kernel half is identical - a user task's own page
+		 * table must translate kernel addresses, that is how
+		 * kernel faults in syscall context are serviced - so the
+		 * current mm is a valid substitute for the walk.  Gate
+		 * the substitution on the THIS_MODULE self-test: if this
+		 * mm's kernel half cannot map our own struct module,
+		 * stay unvalidated rather than walk a foreign layout.
+		 */
+		struct mm_struct *mm = current->active_mm;
+
+		if (mm) {
+			alirt_mm_init_mm = mm;
+#if defined(MODULE) && defined(THIS_MODULE)
+			if (THIS_MODULE &&
+			    !alirt_addr_valid((unsigned long)THIS_MODULE,
+					      sizeof(*THIS_MODULE)))
+				alirt_mm_init_mm = NULL;
+			else
+#endif
+				pr_warn("alirt: powerpc init_mm unresolvable; "
+					"using current->active_mm for the "
+					"kernel-half walk\n");
+		}
+	}
 	if (!alirt_mm_init_mm)
 		return -ENOENT;
 	if (!alirt_addr_valid((unsigned long)alirt_mm_init_mm,
