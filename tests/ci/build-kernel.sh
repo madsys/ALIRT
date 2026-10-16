@@ -107,6 +107,18 @@ if [ "$KARCH" = "mips" ]; then
             arch/mips/kernel/r4k_fpu.S
     fi
 fi
+if [ "$KARCH" = "arm" ]; then
+    if [ "$(printf '%s\n' "3.11" "$KVER" | sort -V | head -n1)" != "3.11" ]; then
+        # multi_v7_defconfig on 3.10 has no CONFIG_OF - only
+        # ARM_APPENDED_DTB, and the CI passes no appended DTB.
+        # QEMU's virt machine describes itself ONLY with a DTB in
+        # r2 (no ATAGS), so without CONFIG_OF the 3.10 kernel finds
+        # neither ATAGS nor a machine_desc and hangs before any
+        # console output (fully silent boot until the QEMU timeout).
+        # Later multi_v7 defconfigs enable OF themselves.
+        ./scripts/config --enable OF --enable OF_FLATTREE
+    fi
+fi
 # gcc-9 vs the 5.10 nfsd code trips a clamp() compiletime_assert in
 # fs/nfsd/nfs4state.c; nothing in ALIRT needs the NFS server.
 ./scripts/config --disable NFSD
