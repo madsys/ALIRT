@@ -334,17 +334,20 @@ PYEOF
                              # -kernel either ("rom: requested regions
                              # overlap (rom mrom.reset)": the ELF program
                              # headers collide with the mrom reset area).
-                             # Wrap the kernel in an OpenSBI fw_payload
-                             # firmware instead: flatten vmlinux with
-                             # objcopy (same recipe the 4.20+ Image target
-                             # uses; riscv vmlinux sections carry physical
-                             # LMAs) and let OpenSBI carry it to
-                             # 0x80200000.  The riscv kernel is medany
-                             # and relocates at runtime via va_pa_offset,
-                             # so the non-default load address is fine.
-                             # No -kernel is passed for this path (KIMG=""
-                             # below); QEMU still hands the initrd through
-                             # the DTB.
+                             # Flatten vmlinux with objcopy (same recipe
+                             # the 4.20+ Image target uses; riscv vmlinux
+                             # sections carry physical LMAs) and boot it
+                             # as a raw binary through the same
+                             # fw_jump.bin + -kernel flow the 4.20+ path
+                             # uses: QEMU loads raw -kernel images at
+                             # 0x80200000, where fw_jump lands.  A
+                             # fw_payload firmware cannot be combined
+                             # with -append on era QEMU ("-append only
+                             # allowed with -kernel"), and without
+                             # -append the guest has no console/cmdline.
+                             # The riscv kernel is medany and relocates
+                             # at runtime via va_pa_offset, so loading
+                             # at the default 0x80200000 is fine.
                              riscv64-linux-gnu-objcopy -O binary \
                                  -R .note -R .comment -R .riscv.attributes \
                                  "$KDIR/vmlinux" /tmp/rv-kernel.bin \
@@ -352,12 +355,10 @@ PYEOF
                              ( cd /tmp && curl -fsSL \
                                  https://github.com/riscv-software-src/opensbi/archive/refs/tags/v1.2.tar.gz | tar xz \
                                  && make -C opensbi-1.2 PLATFORM=generic \
-                                      FW_PAYLOAD=y FW_PAYLOAD_PATH=/tmp/rv-kernel.bin \
-                                      FW_PAYLOAD_OFFSET=0x200000 \
                                       CROSS_COMPILE=riscv64-linux-gnu- -j"$(nproc)" >/dev/null ) \
                                  || { echo "RUNTIME-RESULT: FAIL (opensbi build)"; exit 1; }
-                             QEXTRA="-bios /tmp/opensbi-1.2/build/platform/generic/firmware/fw_payload.bin"
-                             KIMG=""
+                             QEXTRA="-bios /tmp/opensbi-1.2/build/platform/generic/firmware/fw_jump.bin"
+                             KIMG=/tmp/rv-kernel.bin
                          fi
                      else
                          # QEMU >= 5.2 loads the bundled OpenSBI
@@ -378,8 +379,10 @@ PYEOF
         # o32 without CONFIG_HIGHMEM, so cap RAM at 512M: a 1G lowmem
         # region can hang the guest before the serial console registers,
         # producing a completely silent boot.
-        # KIMG is empty on the riscv fw_payload path (4.19): the
-        # firmware carries the kernel, so no -kernel is passed.
+        # KIMG stays set on every riscv path: 4.20+ uses the built
+        # Image, 4.19 the flattened vmlinux binary - both via
+        # fw_jump.bin + -kernel, since era QEMU rejects -append
+        # without -kernel.
         [ -n "$KIMG" ] && KARG="-kernel $KIMG" || KARG=""
         # shellcheck disable=SC2086
         timeout 420 $QEMU ${QMEM:--m 1G} ${QEXTRA:-} $KARG \

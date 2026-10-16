@@ -138,6 +138,7 @@ static inline void *alirt_mod_exit(const struct module *m)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 #  include <linux/fs.h>
 #  include <linux/slab.h>
+#  include <linux/uaccess.h>	/* get_fs/set_fs for alirt_kread fallback */
 /*
  * Fallback name->addr lookup for kernels where the kprobe trick cannot
  * run at all (CONFIG_KPROBES=n - e.g. riscv 5.10, whose arch Kconfig has
@@ -148,6 +149,34 @@ static inline void *alirt_mod_exit(const struct module *m)
  * but only a handful of lookups run at module init, and a zero result
  * degrades every cross-check gracefully.
  */
+/*
+ * Read wrapper for the parser: kernel_read() refuses f_ops that expose
+ * only ->read (procfs seq files such as /proc/kallsyms have no
+ * ->read_iter until much later), returning -EINVAL via warn_unsupported
+ * since 5.9.  While set_fs() exists (< 5.18), fall back to the classic
+ * direct ->read with a kernel buffer, which is exactly what kernel_read
+ * itself did before the kvec rework.  On 5.18+ (set_fs removed) only
+ * kernel_read remains; the parser then degrades and the caller falls
+ * back to the kprobe path.
+ */
+static inline ssize_t alirt_kread(struct file *filp, void *buf, size_t count,
+				  loff_t *pos)
+{
+	ssize_t n = kernel_read(filp, buf, count, pos);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0) && \
+	LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0)
+	if (n == -EINVAL && filp->f_op->read) {
+		mm_segment_t old_fs = get_fs();
+
+		set_fs(KERNEL_DS);
+		n = filp->f_op->read(filp, buf, count, pos);
+		set_fs(old_fs);
+	}
+#endif
+	return n;
+}
+
 static inline unsigned long alirt_ks_lookup(const char *name)
 {
 	struct file *filp;
@@ -170,7 +199,7 @@ static inline unsigned long alirt_ks_lookup(const char *name)
 	{
 		size_t llen = 0;
 
-		while ((n = kernel_read(filp, tmp, 1024, &pos)) > 0) {
+		while ((n = alirt_kread(filp, tmp, 1024, &pos)) > 0) {
 			ssize_t i;
 
 			for (i = 0; i < n; i++) {

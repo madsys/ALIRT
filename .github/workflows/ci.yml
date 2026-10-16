@@ -112,6 +112,13 @@ jobs:
             > "status/${{ matrix.kver }}-${{ matrix.arch }}${{ matrix.tag }}.md"
           cat "status/${{ matrix.kver }}-${{ matrix.arch }}${{ matrix.tag }}.md"
 
+      - name: Keep the VM console log for runtime debugging
+        if: always()
+        run: |
+          mkdir -p status
+          [ -f vm-console.log ] && cp vm-console.log \
+              "status/vm-console-${{ matrix.kver }}-${{ matrix.arch }}${{ matrix.tag }}.log" || true
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

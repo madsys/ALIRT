@@ -96,13 +96,14 @@ if [ "$KARCH" = "mips" ]; then
         # binutils >= 2.26 rejects ldc1/sdc1 under o32's default FP32 mode
         # even with .set mips3 ("opcode not supported on this processor:
         # mips3 'sdc1'...") in arch/mips/kernel/r4k_fpu.S, which uses the
-        # instructions unconditionally.  The instruction encoding is
-        # FR-mode-agnostic, so telling the assembler FP64 mode changes no
-        # output bytes vs the era toolchains that accepted the file.
-        # Whitespace-tolerant: the .set line is "\t.set mips3" (space, not
-        # tab) in 3.10, and the naive tab-only pattern silently matched
-        # nothing.
-        sed -i 's/^[ \t]*\.set[ \t]mips3[ \t]*$/&\n\t.set\tfp=64/' \
+        # instructions unconditionally.  Appending ".set fp=64" does not
+        # help: gas still gates ldc1 on the ISA in this combination.  The
+        # file body only contains plain MIPS I/II integer ops plus these
+        # FR-mode-agnostic ldc1/sdc1, so assembling it as MIPS64 (which
+        # implies a 64-bit FPU and accepts them) emits identical bytes
+        # to what the era toolchains produced under .set mips3.
+        # Whitespace-tolerant: the .set line is "\t.set mips3" in 3.10.
+        sed -i 's/^[ \t]*\.set[ \t]mips3[ \t]*$/\t.set\tmips64/' \
             arch/mips/kernel/r4k_fpu.S
     fi
 fi
