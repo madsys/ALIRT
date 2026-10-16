@@ -73,11 +73,16 @@
  *     on every version since 3.7.  For CONFIG_PGTABLE_LEVELS <= 2 the
  *     PMD level is folded into the pgd entry, PMD_SHIFT is undefined,
  *     and the raw descriptor test is applied to the folded entry.
- *     The walker does not compute block spans: a candidate under a block
- *     descriptor is rejected outright (see alirt_addr_valid — block
- *     mappings reachable from the scan window translate to nonexistent
- *     physical memory on KASLR-era kernels, and genuine module mappings
- *     are always pte-level).
+ *     A candidate under a block descriptor is validated exactly like
+ *     arm64's own kern_addr_valid(): the descriptor's PFN plus the
+ *     candidate's offset inside the block must pass pfn_valid().
+ *     A block maps contiguous physical RAM by construction, so on
+ *     success the walk skips the whole block; blocks covering
+ *     nonexistent physical memory (kernel-image slot padding, vmemmap
+ *     holes) fail the PFN check.  Genuine modules are pte-mapped, but
+ *     the scan window ([THIS_MODULE-1G, THIS_MODULE+1G)) also spans
+ *     the kernel image (partly block-mapped, e.g. .data holding
+ *     init_mm) and the direct map.
  *
  *  6. Leaf check.  pte_present() exists on every arm64 kernel from 3.7
  *     through 7.2 (it tests PTE_VALID; from 4.4 on it additionally
@@ -177,22 +182,23 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 #endif
 
 /*
- * Walk the page tables for the single page containing @addr.  Handles
+ * Walk the page tables for the mapping that covers @addr.  Handles
  * every arm64 translation-table shape (2-5 levels, 4K/16K/64K pages,
  * runtime-folded LPA2 tables on 6.x); on success stores the first
- * address past that page in *@next and returns true, and returns false
- * as soon as any intermediate page-table entry is missing.
+ * address past the mapping in *@next (PAGE_SIZE for a pte leaf, the
+ * block size for a validated block) and returns true, and returns
+ * false as soon as any intermediate page-table entry is missing.
  *
- * Block (section) descriptors are rejected, not walked to their end:
- * the module-space candidates this validates are always pte-mapped
- * (module_alloc/vmalloc space), while the block mappings reachable from
- * the scan window — the kernel-image slot on KASLR-era kernels (mapped
- * with block descriptors whose range extends past the image, observed
- * on 5.10: a read there takes a synchronous external abort) and
- * vmemmap holes — translate to nonexistent physical memory that
- * page-table walking alone cannot detect.  A candidate under a block
- * is therefore never a genuine module; rejecting it keeps the hunter's
- * deref safe.
+ * Leaf validity is the arm64 kern_addr_valid() rule: a descriptor is
+ * accepted only when the PFN it maps for @addr passes pfn_valid().
+ * Page-table walking alone cannot tell whether the mapped physical
+ * page actually exists — the kernel-image slot, the module region
+ * after RANDOMIZE_MODULE_REGION_FULL and vmemmap holes all contain
+ * descriptors that translate to nonexistent memory, and reading them
+ * takes a synchronous external abort.  pfn_valid() rejects exactly
+ * those (observed on 4.19/5.4/5.10: a scan-time deref at such an
+ * address oops'd the guest) while accepting everything genuinely
+ * RAM-backed, including the block-mapped .data page holding init_mm.
  */
 static inline bool alirt_page_mapped(unsigned long addr, unsigned long *next)
 {
@@ -262,23 +268,42 @@ static inline bool alirt_page_mapped(unsigned long addr, unsigned long *next)
 		return false;
 
 	/* PUD-level block (1G @4K, 64G @16K): only when the PUD level
-	 * physically exists.  Blocks are rejected (function header). */
+	 * physically exists.  Accepted when the candidate's PFN inside the
+	 * block passes pfn_valid(); the whole block is then skipped (see
+	 * note 5).  The PFN is extracted from the descriptor itself -
+	 * (val & PHYS_MASK) >> PAGE_SHIFT - exactly what the arch's
+	 * pud_pfn() computes, without depending on its availability. */
 #if ALIRT_PGTABLE_LEVELS > 3
-	if (unlikely(alirt_pud_is_block(*pud)))
-		return false;
+	if (unlikely(alirt_pud_is_block(*pud))) {
+		unsigned long pfn = (pud_val(*pud) & PHYS_MASK) >> PAGE_SHIFT;
+
+		pfn += (addr & ~PUD_MASK) >> PAGE_SHIFT;
+		if (unlikely(!pfn_valid(pfn)))
+			return false;
+		*next = (addr & PUD_MASK) + PUD_SIZE;
+		return true;
+	}
 #endif
 
 	pmd = pmd_offset(pud, addr);
 	if (unlikely(!pmd) || unlikely(pmd_none(*pmd)))
 		return false;
 
-	/* PMD-level block (2M @4K, 32M @16K, 512M @64K): rejected, see the
-	 * function header.  With 2-level tables the PMD level is folded
-	 * into the pgd entry; the raw descriptor test is used there (the
-	 * folded level still carries the level-independent type encoding). */
+	/* PMD-level block (2M @4K, 32M @16K, 512M @64K): same rule as the
+	 * PUD block above.  With 2-level tables the PMD level is folded
+	 * into the pgd entry, PMD_MASK/PMD_SIZE are undefined, and the raw
+	 * descriptor test is used there; such folded top-level blocks are
+	 * conservatively rejected (the scan window never needs them). */
 #if ALIRT_PGTABLE_LEVELS > 2
-	if (unlikely(alirt_pmd_is_block(*pmd)))
-		return false;
+	if (unlikely(alirt_pmd_is_block(*pmd))) {
+		unsigned long pfn = (pmd_val(*pmd) & PHYS_MASK) >> PAGE_SHIFT;
+
+		pfn += (addr & ~PMD_MASK) >> PAGE_SHIFT;
+		if (unlikely(!pfn_valid(pfn)))
+			return false;
+		*next = (addr & PMD_MASK) + PMD_SIZE;
+		return true;
+	}
 #else
 	if (unlikely((pmd_val(*pmd) & PMD_TYPE_MASK) == PMD_TYPE_SECT))
 		return false;
@@ -286,9 +311,14 @@ static inline bool alirt_page_mapped(unsigned long addr, unsigned long *next)
 
 	/* Leaf.  pte_present() exists on every arm64 kernel 3.7-7.2 and
 	 * is true exactly for valid (bit 0 set) page descriptors among the
-	 * entries that can occur in kernel space (see note 6). */
+	 * entries that can occur in kernel space (see note 6).  The
+	 * pfn_valid() gate is what keeps a descriptor that translates to
+	 * nonexistent physical memory from being dereferenced (see the
+	 * function header). */
 	pte = pte_offset_kernel(pmd, addr);
 	if (unlikely(!pte) || unlikely(!pte_present(*pte)))
+		return false;
+	if (unlikely(!pfn_valid((pte_val(*pte) & PHYS_MASK) >> PAGE_SHIFT)))
 		return false;
 
 	*next = (addr & PAGE_MASK) + PAGE_SIZE;
