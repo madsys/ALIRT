@@ -148,7 +148,22 @@ kmake() {
 echo "===== [3/4] Compiling ALIRT modules (src/ layout) ====="
 COMPILE_OK=1
 for tool in mod_hunter process_hunter sock_hunter; do
-    if kmake "M=/src/src/$tool"; then
+    PH_KCFLAGS=()
+    if [ "$tool" = "process_hunter" ]; then
+        # Cross-gcc/header-era include-order workaround (module sources
+        # are frozen): on these combos the SLUB internals that
+        # <linux/slub_def.h> uses are not yet defined when
+        # process_hunter.c reaches it (5.4: memcg_cache_params lives in
+        # the internal mm/slab.h; 6.1: struct slab / slab_address likewise).
+        # x86_64 include order satisfies slub_def.h; these combos don't.
+        # Pre-include the internal header through a tiny shim — see
+        # tests/ci/alirt-slub-shim.h (-I$KDIR/mm exposes mm/slab.h).
+        case "$ARCH:$KVER" in
+            aarch64:5.4.*|powerpc:5.4.*|powerpc:6.1.*)
+                PH_KCFLAGS=(KCFLAGS="-I/src/tests/ci -I$KDIR/mm -include alirt-slub-shim.h") ;;
+        esac
+    fi
+    if kmake "M=/src/src/$tool" ${PH_KCFLAGS[@]+"${PH_KCFLAGS[@]}"}; then
         if [ "$NEED_ALIGN" = "yes" ] && [ "$tool" = "mod_hunter" ]; then
             align_modstruct "/src/src/$tool/$tool.ko"
         fi
@@ -211,7 +226,8 @@ if [ "$RUNTIME" = "true" ]; then
         #             qemu-system-mips64el CPU, and BE Malta under QEMU
         #             8.2 TCG is silent in either width), 8250 -> ttyS0
         #   powerpc : pSeries, hypervisor console -> hvc0
-        #   riscv   : virt (OpenSBI bundled with QEMU boots the Image), 8250 -> ttyS0
+        #   riscv   : virt (OpenSBI bundled with QEMU boots the Image;
+        #             4.19: ELF vmlinux with -bios none), 8250 -> ttyS0
         "${CROSS}gcc" -O2 -static -Wall -o "$R/init" /src/tests/init-cross.c \
             || { echo "RUNTIME-RESULT: FAIL (init build)"; exit 1; }
         ( cd "$R" && find . -print0 | cpio --null -o -H newc --quiet | gzip -9 ) > /ir.cpio.gz
@@ -227,12 +243,25 @@ if [ "$RUNTIME" = "true" ]; then
                      KIMG="$KDIR/vmlinux"
                      CONSOLE="ttyS0"
                      QMEM="-m 512M" ;;
-            powerpc) QEMU="qemu-system-ppc64 -M pseries"
+            # TCG has no Transactional Memory: without cap-htm=off the
+            # guest dies instantly ("No Transactional Memory support in
+            # TCG") and, depending on the kernel's HTM probing, can also
+            # hang the whole boot with zero console output.
+            powerpc) QEMU="qemu-system-ppc64 -M pseries,cap-htm=off"
                      KIMG="$KDIR/arch/powerpc/boot/zImage"
                      CONSOLE="hvc0" ;;
             riscv)   QEMU="qemu-system-riscv64 -M virt"
-                     KIMG="$KDIR/arch/riscv/boot/Image"
-                     CONSOLE="ttyS0" ;;
+                     CONSOLE="ttyS0"
+                     if [ "$(printf '%s\n' "4.20" "$KVER" | sort -V | head -n1)" = "4.20" ]; then
+                         # 4.20+: OpenSBI (bundled with QEMU) boots the
+                         # arch/riscv/boot/Image payload.
+                         KIMG="$KDIR/arch/riscv/boot/Image"
+                     else
+                         # v4.19 has no arch/riscv/boot/Image; boot the ELF
+                         # vmlinux directly, with no firmware.
+                         KIMG="$KDIR/vmlinux"
+                         QEXTRA="-bios none"
+                     fi ;;
             *) echo "RUNTIME-RESULT: FAIL (no QEMU mapping for $ARCH)"; exit 1 ;;
         esac
         # TCG emulation is slow (a full defconfig kernel under emulation):
@@ -241,7 +270,7 @@ if [ "$RUNTIME" = "true" ]; then
         # region can hang the guest before the serial console registers,
         # producing a completely silent boot.
         # shellcheck disable=SC2086
-        timeout 420 $QEMU ${QMEM:--m 1G} \
+        timeout 420 $QEMU ${QMEM:--m 1G} ${QEXTRA:-} \
             -kernel "$KIMG" \
             -initrd /ir.cpio.gz \
             -append "console=$CONSOLE,115200 loglevel=8 panic=10" \
