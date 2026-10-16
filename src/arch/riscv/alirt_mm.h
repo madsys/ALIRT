@@ -85,6 +85,7 @@
 #define ALIRT_ARCH_RISCV_MM_H
 
 #include <linux/mm.h>
+#include <linux/printk.h>
 #include <linux/sched.h>
 #include <linux/version.h>
 
@@ -200,25 +201,84 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 #endif
 #endif
 
+#if defined(CONFIG_64BIT) && \
+	LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0) && \
+	LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0)
+	/*
+	 * TEMPORARY CI diagnostic (remove once the vmalloc-bottom fault on
+	 * 4.19 ~ 5.4 is confirmed fixed): dump every busy vmap_area in and
+	 * around the module window, with flags and physical base, plus the
+	 * raw page-table chain for the first few addresses of the window.
+	 * Mirror layouts are from the v5.4 include/linux/vmalloc.h (stable
+	 * across 5.0 ~ 5.9).
+	 */
+	{
+		struct alirt_diag_vmap_area {
+			unsigned long va_start;		/* +0  */
+			unsigned long va_end;		/* +8  */
+			unsigned long rb_pad[3];	/* +16 (24B) */
+			struct list_head list;		/* +40 (16B) */
+			struct vm_struct *vm;		/* +56 */
+		};
+		unsigned long valist = kln("vmap_area_list");
+		struct list_head *pos;
+		int n = 0;
+
+		if (valist) {
+			pr_info("alirt: DIAG window [%#lx, %#lx) init_mm=%px\n",
+				alirt_mod_start, alirt_mod_end,
+				alirt_mm_init_mm);
+			for (pos = ((struct list_head *)valist)->next;
+			     pos != (struct list_head *)valist && n < 24;
+			     pos = pos->next, n++) {
+				struct alirt_diag_vmap_area *va =
+					(void *)((unsigned long)pos - 40UL);
+				struct vm_struct *vm = va->vm;
+
+				if (!vm) {
+					pr_info("alirt: DIAG va %#lx-%#lx vm=NULL\n",
+						va->va_start, va->va_end);
+					continue;
+				}
+				pr_info("alirt: DIAG va %#lx-%#lx flags=%#lx phys=%#llx caller=%pS\n",
+					va->va_start, va->va_end,
+					*(unsigned long *)((unsigned long)vm + 24),
+					*(unsigned long long *)((unsigned long)vm + 48),
+					*(void **)((unsigned long)vm + 56));
+			}
+		} else {
+			pr_info("alirt: DIAG vmap_area_list unresolved\n");
+		}
+	}
+#endif
+
 	return alirt_mm_init_mm ? 0 : -ENOENT;
 }
 
 /*
- * Walk the page tables to verify that [addr, addr+size) is fully mapped.
- * Handles rv64 sv39 (3-level) / sv48 (4-level) / sv57 (5-level) and
- * rv32 sv32 (2-level); on 6.1+ the sv48/sv57 levels are folded at
- * runtime via pgtable_l4_enabled/pgtable_l5_enabled.  PMD (2M) and PUD
- * (1G) leafs terminate a sub-range early.  Returns false as soon as any
- * intermediate page-table entry is missing.
+ * Walk the page tables for the single mapping that covers @addr and
+ * report its extent.  Handles rv64 sv39 (3-level) / sv48 (4-level) /
+ * sv57 (5-level) and rv32 sv32 (2-level); on 6.1+ the sv48/sv57 levels
+ * are folded at runtime via pgtable_l4_enabled/pgtable_l5_enabled.  On
+ * success *@next receives the first address past the mapping covering
+ * @addr (PAGE_SIZE for a pte leaf, 2MB for a pmd leaf, 1GB for a pud
+ * leaf) and true is returned; on failure *@next is untouched and false
+ * is returned as soon as any intermediate page-table entry is missing.
+ *
+ * Iterative by construction: this function is self-recursive in
+ * spirit (a missing leaf used to tail-recurse into the next sub-range),
+ * and old GCC (<= 7, e.g. the gcc 7.5 on the 5.4-era builders) refuses
+ * to inline any function that calls itself, even through a tail call,
+ * with "error: recursive inlining".  The range walk therefore lives in
+ * alirt_addr_valid() below, which loops over successive mappings.
  */
-static inline bool alirt_addr_valid(unsigned long addr, size_t size)
+static inline bool alirt_page_mapped(unsigned long addr, unsigned long *next)
 {
 	pgd_t *pgd;
 	p4d_t *p4d;
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
-	unsigned long end_addr;
 
 	/* Kernel threads have current->mm == NULL; the kernel address
 	 * space is identical for every mm, so use init_mm (swapper_pg_dir).
@@ -273,8 +333,8 @@ static inline bool alirt_addr_valid(unsigned long addr, size_t size)
 	 * PUD-sized mappings span 1GB (PUD_SHIFT == 30 on every rv64
 	 * kernel, including the runtime-folded 6.1+ ones). */
 	if (pud_leaf(*pud)) {
-		end_addr = (((addr >> PUD_SHIFT) + 1) << PUD_SHIFT) - 1;
-		goto end;
+		*next = ((addr >> PUD_SHIFT) + 1) << PUD_SHIFT;
+		return true;
 	}
 #endif
 
@@ -290,22 +350,54 @@ static inline bool alirt_addr_valid(unsigned long addr, size_t size)
 	 * into the pgd and provides no pmd_leaf().  PMD mappings span
 	 * 2MB (PMD_SHIFT == 21 on every rv64 kernel). */
 	if (pmd_leaf(*pmd)) {
-		end_addr = (((addr >> PMD_SHIFT) + 1) << PMD_SHIFT) - 1;
-		goto end;
+		*next = ((addr >> PMD_SHIFT) + 1) << PMD_SHIFT;
+		return true;
 	}
 #endif
 
 	pte = pte_offset_kernel(pmd, addr);
-	if (unlikely(!pte) || unlikely(!pte_present(*pte)))
+	/* The pfn_valid() gate rejects ioremap()ped device memory.  On
+	 * 4.19 ~ 5.4 module_alloc() is the generic vmalloc_exec() whose
+	 * first-fit range starts at VMALLOC_START, exactly where the
+	 * boot-time ioremaps (uart, plic, pci ecam, ...) also land; the
+	 * vmalloc region therefore mixes RAM-backed module pages with
+	 * device pages, and riscv PTEs carry no attribute to tell them
+	 * apart (no cacheability/attribute bits in the PTE).  The scanner
+	 * treats "mapped" as "safe to dereference as struct module", so
+	 * an ioremap page inside the module window must not validate: on
+	 * bare metal (and QEMU, which raises access faults for loads from
+	 * unimplemented physical addresses) reading it can fault or hit
+	 * device side effects.  Modules are always RAM-backed, so
+	 * requiring a struct page costs nothing for the intended use.
+	 * riscv defaults to FLATMEM, where pfn_valid() is pfn_base <=
+	 * pfn < pfn_base + max_mapnr, i.e. exactly "is RAM". */
+	if (unlikely(!pte) || unlikely(!pte_present(*pte)) ||
+	    unlikely(!pfn_valid(pte_pfn(*pte))))
 		return false;
 
-	end_addr = (((addr >> PAGE_SHIFT) + 1) << PAGE_SHIFT) - 1;
+	*next = (addr & PAGE_MASK) + PAGE_SIZE;
+	return true;
+}
 
-end:
-	if (end_addr >= addr + size - 1)
-		return true;
+/*
+ * Walk the page tables to verify that [addr, addr+size) is fully mapped.
+ * Iterates alirt_page_mapped() over successive mappings; PMD (2M) and
+ * PUD (1G) leafs terminate their sub-range early.  Returns false as
+ * soon as any page-table entry is missing.  See the note on
+ * alirt_page_mapped() for why this is a loop and not a recursion.
+ */
+static inline bool alirt_addr_valid(unsigned long addr, size_t size)
+{
+	unsigned long end = addr + size;
 
-	return alirt_addr_valid(end_addr + 1, size - (end_addr - addr + 1));
+	while (addr < end) {
+		unsigned long next;
+
+		if (unlikely(!alirt_page_mapped(addr, &next)))
+			return false;
+		addr = next;
+	}
+	return true;
 }
 
 /*

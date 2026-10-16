@@ -73,6 +73,12 @@ make ARCH="$KARCH" CROSS_COMPILE="$CROSS" "$DEFCFG" >/dev/null
 # the init_mm-dependent address validation degrade.  The cross-arch
 # defconfigs ship KPROBES=n, so force it on like KALLSYMS_ALL.
 ./scripts/config --enable KPROBES
+# The runtime test boots the guest with -initrd; malta_defconfig (and
+# other cross-arch defconfigs of the matrix) ship BLK_DEV_INITRD=n, so the
+# firmware-passed rd_start=/rd_size= arguments are ignored and the guest
+# panics with "Unable to mount root fs".  Nothing in ALIRT needs it
+# disabled.
+./scripts/config --enable BLK_DEV_INITRD
 if [ "$KARCH" = "mips" ]; then
     # process_hunter.c requires CONFIG_SLUB (compile-time #error in its
     # SLUB path, source frozen); malta_defconfig still selects
