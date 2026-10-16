@@ -26,7 +26,16 @@ case "$ARCH" in
     aarch64) KARCH=arm64;   CROSS="aarch64-linux-gnu-";     IMG=Image;   DEFCFG=defconfig ;;
     armv7)   KARCH=arm;     CROSS="arm-linux-gnueabihf-";   IMG=zImage;  DEFCFG=multi_v7_defconfig ;;
     mips)    KARCH=mips;    CROSS="mipsel-linux-gnu-";      IMG=vmlinux; DEFCFG=malta_defconfig ;;
-    powerpc) KARCH=powerpc; CROSS="powerpc64le-linux-gnu-"; IMG=zImage;  DEFCFG=pseries_defconfig ;;
+    powerpc) KARCH=powerpc; CROSS="powerpc64le-linux-gnu-"; IMG=zImage
+             # pseries_defconfig (the little-endian guest config) only
+             # exists from 4.17; older kernels start from ppc64_defconfig
+             # (big-endian) and must be switched to little-endian to match
+             # the ppc64le toolchain and the LE static init binary.
+             if [ "$(printf '%s\n' "4.17" "$KVER" | sort -V | head -n1)" = "4.17" ]; then
+                 DEFCFG=pseries_defconfig
+             else
+                 DEFCFG=ppc64_defconfig; PPC_OLD_LE=1
+             fi ;;
     riscv)   KARCH=riscv;   CROSS="riscv64-linux-gnu-";     IMG=Image;   DEFCFG=defconfig ;;
     *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
@@ -52,6 +61,9 @@ make ARCH="$KARCH" CROSS_COMPILE="$CROSS" "$DEFCFG" >/dev/null
 # the init_mm-dependent address validation degrade.  The cross-arch
 # defconfigs ship KPROBES=n, so force it on like KALLSYMS_ALL.
 ./scripts/config --enable KPROBES
+if [ "${PPC_OLD_LE:-0}" = "1" ]; then
+    ./scripts/config --enable CPU_LITTLE_ENDIAN
+fi
 make ARCH="$KARCH" CROSS_COMPILE="$CROSS" olddefconfig >/dev/null
 # Note: the kernel image target differs per arch (x86=bzImage, arm64=Image, riscv=Image)
 make -j"$(nproc)" ARCH="$KARCH" CROSS_COMPILE="$CROSS" "$IMG" modules >/dev/null

@@ -26,24 +26,67 @@ jobs:
           - { kver: "6.12.35",  image: "ubuntu:24.04", arch: "x86_64",  runtime: true }
           - { kver: "6.18.56",  image: "ubuntu:24.04", arch: "x86_64",  runtime: true }
           - { kver: "7.2.10",   image: "ubuntu:24.04", arch: "x86_64",  runtime: true }
-          - { kver: "5.15.180", image: "ubuntu:22.04", arch: "aarch64", runtime: false }
-          - { kver: "6.12.35",  image: "ubuntu:24.04", arch: "aarch64", runtime: false }
           # Cross-architecture QEMU runtime jobs: qarch selects the QEMU
-          # emulator/mapping used by run-in-container.sh; tag distinguishes
-          # these runtime jobs from the compile-only aarch64 entries above
-          # in artifacts and job names.
+          # emulator/mapping used by run-in-container.sh; the -rt tag
+          # distinguishes runtime jobs in artifacts and job names.  Older
+          # kernels run on era-matched images because their toolchains do
+          # not build with a current gcc.  Architecture floors: arm64 has
+          # no usable mainline defconfig before 4.4, powerpc little-endian
+          # was merged in 3.13 (the matrix starts at 4.4), and riscv only
+          # exists from 4.15 on (the matrix starts at 4.19).
+          # aarch64
+          - { kver: "4.4.302",  image: "ubuntu:16.04", arch: "aarch64", runtime: true, qarch: "aarch64", tag: "-rt" }
+          - { kver: "4.19.325", image: "ubuntu:18.04", arch: "aarch64", runtime: true, qarch: "aarch64", tag: "-rt" }
+          - { kver: "5.4.290",  image: "ubuntu:20.04", arch: "aarch64", runtime: true, qarch: "aarch64", tag: "-rt" }
+          - { kver: "5.10.271", image: "ubuntu:20.04", arch: "aarch64", runtime: true, qarch: "aarch64", tag: "-rt" }
+          - { kver: "5.15.180", image: "ubuntu:22.04", arch: "aarch64", runtime: true, qarch: "aarch64", tag: "-rt" }
+          - { kver: "6.1.189",  image: "ubuntu:22.04", arch: "aarch64", runtime: true, qarch: "aarch64", tag: "-rt" }
+          - { kver: "6.6.158",  image: "ubuntu:22.04", arch: "aarch64", runtime: true, qarch: "aarch64", tag: "-rt" }
           - { kver: "6.12.35",  image: "ubuntu:24.04", arch: "aarch64", runtime: true, qarch: "aarch64", tag: "-rt" }
           - { kver: "6.18.56",  image: "ubuntu:24.04", arch: "aarch64", runtime: true, qarch: "aarch64", tag: "-rt" }
           - { kver: "7.2.10",   image: "ubuntu:24.04", arch: "aarch64", runtime: true, qarch: "aarch64", tag: "-rt" }
+          # armv7
+          - { kver: "3.10.108", image: "ubuntu:16.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
+          - { kver: "4.4.302",  image: "ubuntu:16.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
+          - { kver: "4.19.325", image: "ubuntu:18.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
+          - { kver: "5.4.290",  image: "ubuntu:20.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
+          - { kver: "5.10.271", image: "ubuntu:20.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
+          - { kver: "5.15.180", image: "ubuntu:22.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
+          - { kver: "6.1.189",  image: "ubuntu:22.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
+          - { kver: "6.6.158",  image: "ubuntu:22.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
           - { kver: "6.12.35",  image: "ubuntu:24.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
           - { kver: "6.18.56",  image: "ubuntu:24.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
           - { kver: "7.2.10",   image: "ubuntu:24.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
+          # mips (little-endian o32 Malta)
+          - { kver: "3.10.108", image: "ubuntu:16.04", arch: "mips",    runtime: true, qarch: "mips",    tag: "-rt" }
+          - { kver: "4.4.302",  image: "ubuntu:16.04", arch: "mips",    runtime: true, qarch: "mips",    tag: "-rt" }
+          - { kver: "4.19.325", image: "ubuntu:18.04", arch: "mips",    runtime: true, qarch: "mips",    tag: "-rt" }
+          - { kver: "5.4.290",  image: "ubuntu:20.04", arch: "mips",    runtime: true, qarch: "mips",    tag: "-rt" }
+          - { kver: "5.10.271", image: "ubuntu:20.04", arch: "mips",    runtime: true, qarch: "mips",    tag: "-rt" }
+          - { kver: "5.15.180", image: "ubuntu:22.04", arch: "mips",    runtime: true, qarch: "mips",    tag: "-rt" }
+          - { kver: "6.1.189",  image: "ubuntu:22.04", arch: "mips",    runtime: true, qarch: "mips",    tag: "-rt" }
+          - { kver: "6.6.158",  image: "ubuntu:22.04", arch: "mips",    runtime: true, qarch: "mips",    tag: "-rt" }
           - { kver: "6.12.35",  image: "ubuntu:24.04", arch: "mips",    runtime: true, qarch: "mips",    tag: "-rt" }
           - { kver: "6.18.56",  image: "ubuntu:24.04", arch: "mips",    runtime: true, qarch: "mips",    tag: "-rt" }
           - { kver: "7.2.10",   image: "ubuntu:24.04", arch: "mips",    runtime: true, qarch: "mips",    tag: "-rt" }
+          # powerpc (ppc64le pseries)
+          - { kver: "4.4.302",  image: "ubuntu:16.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
+          - { kver: "4.19.325", image: "ubuntu:18.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
+          - { kver: "5.4.290",  image: "ubuntu:20.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
+          - { kver: "5.10.271", image: "ubuntu:20.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
+          - { kver: "5.15.180", image: "ubuntu:22.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
+          - { kver: "6.1.189",  image: "ubuntu:22.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
+          - { kver: "6.6.158",  image: "ubuntu:22.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
           - { kver: "6.12.35",  image: "ubuntu:24.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
           - { kver: "6.18.56",  image: "ubuntu:24.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
           - { kver: "7.2.10",   image: "ubuntu:24.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
+          # riscv (rv64; the arch only exists from 4.15, matrix starts 4.19)
+          - { kver: "4.19.325", image: "ubuntu:20.04", arch: "riscv",   runtime: true, qarch: "riscv",   tag: "-rt" }
+          - { kver: "5.4.290",  image: "ubuntu:20.04", arch: "riscv",   runtime: true, qarch: "riscv",   tag: "-rt" }
+          - { kver: "5.10.271", image: "ubuntu:20.04", arch: "riscv",   runtime: true, qarch: "riscv",   tag: "-rt" }
+          - { kver: "5.15.180", image: "ubuntu:22.04", arch: "riscv",   runtime: true, qarch: "riscv",   tag: "-rt" }
+          - { kver: "6.1.189",  image: "ubuntu:22.04", arch: "riscv",   runtime: true, qarch: "riscv",   tag: "-rt" }
+          - { kver: "6.6.158",  image: "ubuntu:22.04", arch: "riscv",   runtime: true, qarch: "riscv",   tag: "-rt" }
           - { kver: "6.12.35",  image: "ubuntu:24.04", arch: "riscv",   runtime: true, qarch: "riscv",   tag: "-rt" }
           - { kver: "6.18.56",  image: "ubuntu:24.04", arch: "riscv",   runtime: true, qarch: "riscv",   tag: "-rt" }
           - { kver: "7.2.10",   image: "ubuntu:24.04", arch: "riscv",   runtime: true, qarch: "riscv",   tag: "-rt" }
