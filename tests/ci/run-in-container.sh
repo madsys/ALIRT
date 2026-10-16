@@ -263,20 +263,49 @@ if [ "$RUNTIME" = "true" ]; then
                      QEMU="$QBIN -M $MACH"
                      KIMG="$KDIR/arch/powerpc/boot/zImage"
                      # SLOF in QEMU < 5.0 places the initrd right after
-                     # the *file size* of the loaded kernel image, without
-                     # reserving room for the decompressed kernel; the
-                     # growing kernel image then overwrites the initrd and
-                     # the initramfs unpacker dies on garbage ("invalid
-                     # magic at start of compressed archive"; seen on
-                     # 4.19.325 and 5.4.290).  QEMU 6.x places the initrd
-                     # above the decompressed kernel.  Pad the boot image
-                     # to 128M on old QEMU so the initrd lands clear of
-                     # the decompression window (the wrapper takes the
-                     # real kernel size from its own header and ignores
-                     # the trailing padding).
+                     # the kernel image it loaded, sized from the ELF
+                     # program headers, without reserving room for the
+                     # decompressed kernel; the growing kernel image then
+                     # overwrites the initrd and the initramfs unpacker
+                     # dies on garbage ("invalid magic at start of
+                     # compressed archive"; seen on 4.19.325 and
+                     # 5.4.290).  Inflate the last PT_LOAD of the zImage
+                     # ELF (p_filesz + p_memsz) to 128M so SLOF places
+                     # the initrd above the decompression window; the
+                     # wrapper and the decompressed kernel only touch
+                     # the real image bytes.  (Padding the file tail
+                     # alone does nothing: SLOF loads segments, not
+                     # trailing bytes.)
                      if [ "$QMAJ" -lt 5 ]; then
                          cp "$KIMG" /tmp/ppc-zImage
-                         truncate -s 128M /tmp/ppc-zImage
+                         python3 - /tmp/ppc-zImage <<'PYEOF'
+import struct, sys
+p = sys.argv[1]
+f = open(p, 'r+b')
+d = f.read(0x40)
+assert d[:4] == b'\x7fELF' and d[4] == 2, 'ppc64 zImage must be ELF64'
+phoff = struct.unpack_from('<Q', d, 0x20)[0]
+phentsize, phnum = struct.unpack_from('<HH', d, 0x36)
+last = None
+for i in range(phnum):
+    off = phoff + i * phentsize
+    f.seek(off)
+    ph = f.read(phentsize)
+    if struct.unpack_from('<I', ph, 0)[0] == 1:
+        last = (off, ph)
+off, ph = last
+p_offset = struct.unpack_from('<Q', ph, 8)[0]
+p_filesz, p_memsz = struct.unpack_from('<QQ', ph, 0x20)
+target = 0x8000000
+if p_offset + p_filesz < target:
+    nf = target - p_offset
+    f.seek(off + 0x20); f.write(struct.pack('<Q', nf))
+    f.seek(off + 0x28); f.write(struct.pack('<Q', max(p_memsz, nf)))
+    f.seek(0, 2)
+    if f.tell() < p_offset + nf:
+        f.truncate(p_offset + nf)
+f.close()
+PYEOF
                          KIMG=/tmp/ppc-zImage
                      fi
                      CONSOLE="hvc0" ;;

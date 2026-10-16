@@ -225,7 +225,21 @@ static inline int alirt_resolve_kln(unsigned long (**kln)(const char *name))
 	/* Every supported pre-5.7 kernel exports it (GPL) */
 	*kln = kallsyms_lookup_name;
 	return 0;
-#elif defined(CONFIG_KPROBES)
+#else
+	/*
+	 * >= 5.7: prefer the /proc/kallsyms parser whenever it works.  The
+	 * kprobe path below is broken on ppc64 ELFv2 in a way no prologue
+	 * scan can repair: the resolved address can be the ftrace site of
+	 * the -mprofile-kernel stub and r2 still holds the *caller's* TOC
+	 * (observed on 5.15.180 - oops in kallsyms_lookup_name at +0x30,
+	 * DAR in the vmalloc range).  The parser needs nothing but the
+	 * symbol table, which is intact when root inserts the module.
+	 */
+	if (alirt_ks_lookup("kallsyms_lookup_name")) {
+		*kln = alirt_ks_lookup;
+		return 0;
+	}
+#if defined(CONFIG_KPROBES)
 	/*
 	 * kprobe trick: register a kprobe that is never triggered;
 	 * register_kprobe fills the symbol address into kp.addr.
@@ -338,6 +352,7 @@ static inline int alirt_resolve_kln(unsigned long (**kln)(const char *name))
 	/* No KPROBES at all (e.g. riscv 5.10): /proc/kallsyms parser. */
 	*kln = alirt_ks_lookup;
 	return 0;
+#endif
 #endif
 }
 
