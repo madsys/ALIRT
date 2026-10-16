@@ -47,10 +47,11 @@
  *
  * Version notes (all verified against kernel.org stable tags):
  *   - pgd_offset/pud_offset/pmd_offset/pte_offset_kernel exist on
- *     every version: ARM defined them in asm/pgtable.h through v5.4
- *     (pgtable.h:182/:206 at v5.4); from v5.8 on the generic fallbacks
- *     in include/linux/pgtable.h (present since v4.11) take over.  We
- *     include <linux/pgtable.h> on >= 4.11 and <asm/pgtable.h>
+ *     every version: ARM defined them in asm/pgtable.h through v5.7;
+ *     from v5.8 on the generic fallbacks in include/linux/pgtable.h
+ *     (created in v5.8 — including it on 4.11-5.7 dies with "No such
+ *     file or directory", verified on the 4.19/5.4 CI jobs) take over.
+ *     We include <linux/pgtable.h> on >= 5.8 and <asm/pgtable.h>
  *     otherwise; semantics are identical (both index mm->pgd and use
  *     pmd_page_vaddr()).
  *   - pud_offset() takes a pgd_t * through v5.4 (4level-fixup.h /
