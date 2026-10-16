@@ -70,7 +70,11 @@ jobs:
           - { kver: "6.18.56",  image: "ubuntu:24.04", arch: "mips",    runtime: true, qarch: "mips",    tag: "-rt" }
           - { kver: "7.2.10",   image: "ubuntu:24.04", arch: "mips",    runtime: true, qarch: "mips",    tag: "-rt" }
           # powerpc (ppc64le pseries)
-          - { kver: "4.4.302",  image: "ubuntu:16.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
+          # 4.4 needs QEMU >= 2.10 for the cap-htm=off property (era 16.04
+          # ships 2.5, whose SLOF dies reading SPR 1012 with zero console
+          # output); 18.04's 2.11 supports the property and builds 4.4
+          # with gcc-7 fine.
+          - { kver: "4.4.302",  image: "ubuntu:18.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
           - { kver: "4.19.325", image: "ubuntu:18.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
           - { kver: "5.4.290",  image: "ubuntu:20.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
           - { kver: "5.10.271", image: "ubuntu:20.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }

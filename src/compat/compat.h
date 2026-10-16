@@ -243,6 +243,26 @@ static inline unsigned long alirt_kln_lookup(const char *name)
 		alirt_module_kset_shadow = THIS_MODULE->mkobj.kobj.kset;
 		return (unsigned long)&alirt_module_kset_shadow;
 	}
+	/*
+	 * "modules" shadow: the frozen caller casts the return value to
+	 * struct list_head * and walks from it.  When THIS_MODULE is the
+	 * only entry left on the module list (hide_self has already
+	 * list_del()ed itself before mod_hunter loads), its list.next IS
+	 * the address of the (file-local, never exported) "modules" head
+	 * in kernel/module*.c - the shadow returns that head directly, no
+	 * dereference needed.  This is the only way to obtain the head on
+	 * ppc64 >= 5.7, where the address also fails the caller's
+	 * canonical-pointer gate (0xc0.. is neither 48- nor 57-bit
+	 * sign-extended), so the module_kset shadow above cannot feed the
+	 * kset cross-check there; the list cross-check stays alive via
+	 * this shadow and yields HIGH (missing-from-list) verdicts.
+	 * Guard against an unlinked THIS_MODULE (next == prev == &self)
+	 * so a corner-case caller never gets our own list node as "head".
+	 */
+	if (!strcmp(name, "modules") &&
+	    THIS_MODULE->list.next == THIS_MODULE->list.prev &&
+	    THIS_MODULE->list.next != &THIS_MODULE->list)
+		return (unsigned long)THIS_MODULE->list.next;
 #endif
 	return alirt_ks_lookup(name);
 }
@@ -271,33 +291,35 @@ static inline int alirt_resolve_kln(unsigned long (**kln)(const char *name))
 	*kln = kallsyms_lookup_name;
 	return 0;
 #else
-#if defined(CONFIG_PPC64) && defined(CONFIG_PPC64_ELF_ABI_V2)
-	/*
-	 * ppc64 ELFv2 >= 5.7: skip the kprobe path entirely - it resolves
-	 * an address that is not safe to CALL from a module (observed
-	 * oops inside kallsyms_lookup_name at +0x30 on 5.15.180 and
-	 * +0x44 on 5.10.271, both with the module TOC still in r2: with
-	 * KPROBES_ON_FTRACE kp.addr is the ftrace site, and no global
-	 * entry scan around it produces a callable prologue).  The
-	 * parser-wrapper below never calls kernel text.  On >= 5.9 its
-	 * /proc/kallsyms reads fail too (no set_fs on this arch in the
-	 * kvec era), but alirt_kln_lookup still resolves module_kset from
-	 * our own module's kobject, and the kset cross-check alone
-	 * yields HIGH/CRITICAL verdicts; the arch mm layer substitutes
-	 * current->mm when init_mm is unresolvable.  Nothing the kprobe
-	 * path could add is reachable without crashing first.
-	 */
+/*
+ * ppc64 ELFv2, 5.7 <= version < 6.1: skip the kprobe path entirely.
+ * CONFIG_PPC64_ELF_ABI_V2 only exists since 6.1, so the era-correct
+ * ELFv2 test below is CPU_LITTLE_ENDIAN (every LE ppc64 build is ELFv2;
+ * big-endian was ELFv1 until the explicit 6.1 choice arrived, and CI
+ * builds LE exclusively via build-kernel.sh).
+ *
+ * Why only pre-6.1: on 6.1+ the kprobe path below plus the global-entry
+ * scan demonstrably resolves a callable kallsyms_lookup_name (matrix
+ * green since v0.6.0), but on 5.10.271/5.15.180 kp.addr resolves an
+ * address that is not safe to CALL from a module (observed oops inside
+ * kallsyms_lookup_name at +0x44/+0x30, module TOC still in r2: with
+ * KPROBES_ON_FTRACE kp.addr can be the ftrace site and the GE scan
+ * finds no callable prologue).  The parser-wrapper below never calls
+ * kernel text; its gaps on this path are closed arch-side: the module
+ * list head reaches the caller through the "modules" shadow in
+ * alirt_kln_lookup(), and init_mm through init_task.active_mm (see
+ * src/arch/powerpc/alirt_mm.h).
+ */
+#if defined(CONFIG_PPC64) && defined(CONFIG_CPU_LITTLE_ENDIAN) && \
+	LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 	*kln = alirt_kln_lookup;
 	return 0;
 #endif
 	/*
-	 * >= 5.7: prefer the /proc/kallsyms parser whenever it works.  The
-	 * kprobe path below is broken on ppc64 ELFv2 in a way no prologue
-	 * scan can repair: the resolved address can be the ftrace site of
-	 * the -mprofile-kernel stub and r2 still holds the *caller's* TOC
-	 * (observed on 5.15.180 - oops in kallsyms_lookup_name at +0x30,
-	 * DAR in the vmalloc range).  The parser needs nothing but the
+	 * >= 5.7 (non-ppc64, or ppc64 >= 6.1): prefer the /proc/kallsyms
+	 * parser whenever it works.  The parser needs nothing but the
 	 * symbol table, which is intact when root inserts the module.
+	 * Pre-6.1 ppc64 never reaches this point (skipped above).
 	 */
 	if (alirt_ks_lookup("kallsyms_lookup_name")) {
 		*kln = alirt_kln_lookup;

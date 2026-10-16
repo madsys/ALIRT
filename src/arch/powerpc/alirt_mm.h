@@ -124,16 +124,24 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 		/*
 		 * init_mm is a KALLSYMS_ALL-only data symbol and can be
 		 * unresolvable (ppc64 >= 5.7 has no callable
-		 * kallsyms_lookup_name; see alirt_resolve_kln).  Every
-		 * mm's kernel half is identical - a user task's own page
-		 * table must translate kernel addresses, that is how
-		 * kernel faults in syscall context are serviced - so the
-		 * current mm is a valid substitute for the walk.  Gate
-		 * the substitution on the THIS_MODULE self-test: if this
-		 * mm's kernel half cannot map our own struct module,
+		 * kallsyms_lookup_name; see alirt_resolve_kln).  init_task
+		 * is exported on every supported kernel and statically
+		 * initialised with active_mm = &init_mm, so it reaches
+		 * init_mm without kallsyms.
+		 *
+		 * current->active_mm is NOT a substitute on this arch:
+		 * radix process page tables carry no kernel mappings
+		 * (kernel accesses from user context are repaired through
+		 * vmalloc_fault against the init_mm tables), so walking
+		 * module space through a user mm rejects every address -
+		 * observed in CI as a silent self-test failure and a scan
+		 * reporting zero candidates on 6.1/6.6/6.12/7.2.
+		 * Gate the substitution on the THIS_MODULE self-test: if
+		 * init_mm's kernel half cannot map our own struct module,
 		 * stay unvalidated rather than walk a foreign layout.
 		 */
-		struct mm_struct *mm = current->active_mm;
+		extern struct task_struct init_task;
+		struct mm_struct *mm = init_task.active_mm;
 
 		if (mm) {
 			alirt_mm_init_mm = mm;
@@ -145,8 +153,8 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 			else
 #endif
 				pr_warn("alirt: powerpc init_mm unresolvable; "
-					"using current->active_mm for the "
-					"kernel-half walk\n");
+					"using init_task.active_mm (&init_mm) "
+					"for the kernel-half walk\n");
 		}
 	}
 	if (!alirt_mm_init_mm)

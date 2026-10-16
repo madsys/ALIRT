@@ -94,16 +94,25 @@ if [ "$KARCH" = "mips" ]; then
     ./scripts/config --disable SLAB --enable SLUB
     if [ "$(printf '%s\n' "3.11" "$KVER" | sort -V | head -n1)" != "3.11" ]; then
         # binutils >= 2.26 rejects ldc1/sdc1 under o32's default FP32 mode
-        # even with .set mips3 ("opcode not supported on this processor:
-        # mips3 'sdc1'...") in arch/mips/kernel/r4k_fpu.S, which uses the
-        # instructions unconditionally.  Appending ".set fp=64" does not
-        # help: gas still gates ldc1 on the ISA in this combination.  The
-        # file body only contains plain MIPS I/II integer ops plus these
-        # FR-mode-agnostic ldc1/sdc1, so assembling it as MIPS64 (which
-        # implies a 64-bit FPU and accepts them) emits identical bytes
-        # to what the era toolchains produced under .set mips3.
-        # Whitespace-tolerant: the .set line is "\t.set mips3" in 3.10.
-        sed -i 's/^[ \t]*\.set[ \t]mips3[ \t]*$/\t.set\tmips64/' \
+        # ("opcode not supported on this processor") in
+        # arch/mips/kernel/r4k_fpu.S, which uses the instructions
+        # unconditionally via the file-local EX macro; .set mips64 (tried
+        # earlier) and ".set fp=64" both still gate the coprocessor
+        # load/store on the o32 FP ABI.  The source lines are the
+        # mechanical form
+        #   EX [ls]dc1 $fN, SC_FPREGS+M(a0)      (SC_FPREGS = 272)
+        # so expand EX by hand and emit the I-type .word encoding of the
+        # instruction (LDC1 0x33 / SDC1 0x3F, rs=$4, ft=N, imm=272+M) -
+        # the exact bytes the era toolchains produced, with the identical
+        # __ex_table record EX would have generated.  The SC32_FPREGS
+        # lines under CONFIG_MIPS32_COMPAT are left alone (64-bit-only
+        # config, never built here).  Label counter: source line number.
+        perl -i -pe '
+if (/^\s*EX\s+([ls]dc1)\s+\$f(\d+),\s*SC_FPREGS\+(\d+)\(a0\)\s*$/) {
+  my $l = "alirt_ex_" . $.;
+  my $w = sprintf("0x%08x", (($1 eq "ldc1" ? 0x33 : 0x3F) << 26) | (4 << 21) | ($2 << 16) | (272 + $3));
+  $_ = qq(\t.set\tpush\n\t.set\tnomacro\n$l: .word\t$w\n\t.set\tpop\n\t.section __ex_table,"a"\n\tPTR\t$l, fault\n\t.previous\n);
+}' \
             arch/mips/kernel/r4k_fpu.S
     fi
 fi

@@ -241,7 +241,19 @@ if [ "$RUNTIME" = "true" ]; then
             aarch64) QEMU="qemu-system-aarch64 -M virt -cpu cortex-a57"
                      KIMG="$KDIR/arch/arm64/boot/Image"
                      CONSOLE="ttyAMA0" ;;
-            armv7)   QEMU="qemu-system-arm -M virt -cpu cortex-a15"
+            armv7)   # 3.10 has no mach-virt support and QEMU's virt
+                     # machine presents no ATAG-capable machine ID it
+                     # recognises: with -M virt the kernel hangs before
+                     # any console output even with CONFIG_OF (fb2e0d9),
+                     # fully silent until the timeout.  vexpress-a15 is
+                     # the era-correct machine (multi_v7_defconfig has
+                     # CONFIG_ARCH_VEXPRESS=y on 3.10) and boots 3.10
+                     # reliably under QEMU 2.5.  4.4+ stay on virt.
+                     if [ "$(printf '%s\n' "3.11" "$KVER" | sort -V | head -n1)" != "3.11" ]; then
+                         QEMU="qemu-system-arm -M vexpress-a15 -cpu cortex-a15"
+                     else
+                         QEMU="qemu-system-arm -M virt -cpu cortex-a15"
+                     fi
                      KIMG="$KDIR/arch/arm/boot/zImage"
                      CONSOLE="ttyAMA0" ;;
             mips)    QEMU="qemu-system-mipsel -M malta"
