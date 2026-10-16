@@ -163,14 +163,6 @@ for tool in mod_hunter process_hunter sock_hunter; do
                 KCFLAGS_EXTRA="-I/src/tests/ci -I$KDIR/mm -include alirt-slub-shim.h" ;;
         esac
     fi
-    if [ "$NEED_ALIGN" = "yes" ]; then
-        # binutils gained objcopy --set-section-alignment only in 2.39,
-        # so align_modstruct() below silently no-ops on every era image
-        # up to 22.04 (it only warns).  Ask gcc for 16-byte variable
-        # alignment instead: the loader then places struct module on a
-        # scanned offset regardless of the objcopy tweak.
-        KCFLAGS_EXTRA="$KCFLAGS_EXTRA -falign-variables=16"
-    fi
     KM_EXTRA=()
     [ -n "$KCFLAGS_EXTRA" ] && KM_EXTRA=("KCFLAGS=$KCFLAGS_EXTRA")
     if kmake "M=/src/src/$tool" ${KM_EXTRA[@]+"${KM_EXTRA[@]}"}; then
@@ -194,12 +186,8 @@ fi
 
 if [ "$RUNTIME" = "true" ]; then
     echo "===== [4/4] QEMU runtime detection test ====="
-    # Build the self-hiding sample module (same alignment flag as above)
-    SAMPLE_KCFLAGS=()
-    if [ "$NEED_ALIGN" = "yes" ]; then
-        SAMPLE_KCFLAGS=("KCFLAGS=-falign-variables=16")
-    fi
-    kmake M=/src/tests/samples ${SAMPLE_KCFLAGS[@]+"${SAMPLE_KCFLAGS[@]}"} \
+    # Build the self-hiding sample module
+    kmake M=/src/tests/samples \
         || { echo "RUNTIME-RESULT: FAIL (sample build)"; exit 1; }
     if [ "$NEED_ALIGN" = "yes" ]; then
         for ko in /src/tests/samples/*.ko; do
