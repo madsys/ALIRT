@@ -66,6 +66,12 @@ make ARCH="$KARCH" CROSS_COMPILE="$CROSS" "$DEFCFG" >/dev/null
 # 3.10 ships CONFIG_MODULES=n ("The present kernel configuration has
 # modules disabled"), which makes the modules target a hard error.
 ./scripts/config --enable MODULES
+# mod_hunter reads struct module.exit directly (source frozen); on 3.10 the
+# member only exists under CONFIG_MODULE_UNLOAD (multi_v7_defconfig ships
+# it off - hence the armv7 3.10 build error - while x86 defconfig has it
+# on).  Enable everywhere: the compat layer's alirt_mod_exit() handles
+# either layout, but the frozen caller requires the member to exist.
+./scripts/config --enable MODULE_UNLOAD
 ./scripts/config --enable KALLSYMS_ALL
 # ALIRT resolves kallsyms_lookup_name via the kprobe trick on >= 5.7
 # (see alirt_resolve_kln() in compat.h); without CONFIG_KPROBES that
@@ -93,7 +99,10 @@ if [ "$KARCH" = "mips" ]; then
         # instructions unconditionally.  The instruction encoding is
         # FR-mode-agnostic, so telling the assembler FP64 mode changes no
         # output bytes vs the era toolchains that accepted the file.
-        sed -i 's/^\t\.set\tmips3$/\t.set\tmips3\n\t.set\tfp=64/' \
+        # Whitespace-tolerant: the .set line is "\t.set mips3" (space, not
+        # tab) in 3.10, and the naive tab-only pattern silently matched
+        # nothing.
+        sed -i 's/^[ \t]*\.set[ \t]mips3[ \t]*$/&\n\t.set\tfp=64/' \
             arch/mips/kernel/r4k_fpu.S
     fi
 fi
