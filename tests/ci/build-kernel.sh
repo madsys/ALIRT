@@ -93,43 +93,19 @@ if [ "$KARCH" = "mips" ]; then
     # the y-member win the choice.
     ./scripts/config --disable SLAB --enable SLUB
     if [ "$(printf '%s\n' "3.11" "$KVER" | sort -V | head -n1)" != "3.11" ]; then
-        # binutils >= 2.26 rejects ldc1/sdc1 under o32's default FP32 mode
-        # ("opcode not supported on this processor") in
-        # arch/mips/kernel/r4k_fpu.S, which uses the instructions
-        # unconditionally via the file-local EX macro; .set mips64 (tried
-        # earlier) and ".set fp=64" both still gate the coprocessor
-        # load/store on the o32 FP ABI.  The source lines are the
-        # mechanical form
-        #   EX [ls]dc1 $fN, SC_FPREGS+M(a0)      (SC_FPREGS = 272)
-        # so expand EX by hand and emit the I-type .word encoding of the
-        # instruction (LDC1 0x33 / SDC1 0x3F, rs=$4, ft=N, imm=272+M) -
-        # the exact bytes the era toolchains produced, with the identical
-        # __ex_table record EX would have generated.  The SC32_FPREGS
-        # lines under CONFIG_MIPS32_COMPAT are left alone (64-bit-only
-        # config, never built here).  Label counter: source line number.
-        perl -i -pe '
-if (/^\s*EX\s+([ls]dc1)\s+\$f(\d+),\s*SC_FPREGS\+(\d+)\(a0\)\s*$/) {
-  my $l = "alirt_ex_" . $.;
-  my $w = sprintf("0x%08x", (($1 eq "ldc1" ? 0x33 : 0x3F) << 26) | (4 << 21) | ($2 << 16) | (272 + $3));
-  $_ = qq(\t.set\tpush\n\t.set\tnomacro\n$l: .word\t$w\n\t.set\tpop\n\t.section __ex_table,"a"\n\tPTR\t$l, fault\n\t.previous\n);
-}' \
-            arch/mips/kernel/r4k_fpu.S
-        # The same o32 FP32 gate hits the fpu_save_double/fpu_restore_double
-        # macros in asmmacro-32.h (sdc1/ldc1 $fN, THREAD_FPRN(\thread),
-        # called from r4k_switch.S with \thread == a0).  Rewrite the
-        # macro bodies to emit the I-type .word encoding; the immediate
-        # stays the symbolic THREAD_FPRN (resolved from asm-offsets, so
-        # no offset is hardcoded).  Guard the base register: the rs
-        # field is encoded for a0 ($4), and .ifc aborts the assembly
-        # if a future call site passes another base instead of silently
-        # emitting a wrong rs field.
-        perl -i -pe '
-if (/^\t([ls]dc1)\t\$f(\d+),\s*(THREAD_FPR\d+)\(\\thread\)$/) {
-  my $op = ($1 eq "ldc1") ? 0x33 : 0x3F;
-  my $w = sprintf("0x%08x", $op << 26);
-  $_ = "\t.ifc \\thread, a0\n\t.word\t($w | (4 << 21) | ($2 << 16) | ($3))\n\t.else\n\t.abort\t\"alirt: $1 base != a0\"\n\t.endif\n";
-}' \
-            arch/mips/include/asm/asmmacro-32.h
+        # gcc >= 4.9 (Ubuntu 16.04 ships gcc-5) forwards -msoft-float to
+        # gas, so gas assembles in soft-float mode and rejects EVERY FP
+        # mnemonic with "opcode not supported on this processor" - seen
+        # in r4k_fpu.S via EX-ldc1/sdc1, then r4k_switch.S via the
+        # asmmacro-32.h fpu_save/restore_double expansions, then even
+        # mtc1/cfc1/ctc1 via fpu_save/restore_single.  Era toolchains
+        # never passed the flag to gas and 3.10's .S sources use FP
+        # instructions freely.  v4.4 solved the same problem with
+        # per-site SET_HARDFLOAT markers (GAS_HAS_SET_HARDFLOAT); for
+        # 3.10 restore hardfloat assembly mode globally - every mips
+        # .S file includes asm.h before touching FP registers.
+        printf '\n/* gcc >= 4.9 forwards -msoft-float to gas, which then\n   rejects FP mnemonics tree-wide; era gas never saw the flag.\n   v4.4 fixed this with SET_HARDFLOAT markers - restore\n   hardfloat assembly mode globally instead. */\n\t.set\thardfloat\n' \
+            >> arch/mips/include/asm/asm.h
     fi
 fi
 if [ "$KARCH" = "arm" ]; then
@@ -167,6 +143,12 @@ if [ "$KARCH" = "powerpc" ]; then
     ./scripts/config --disable CPU_BIG_ENDIAN --enable CPU_LITTLE_ENDIAN
 fi
 make ARCH="$KARCH" CROSS_COMPILE="$CROSS" olddefconfig >/dev/null
+if [ "$KARCH" = "arm" ] && [ "$(printf '%s\n' "3.11" "$KVER" | sort -V | head -n1)" != "3.11" ]; then
+    # 3.10 vexpress boot-silence observability: prove the DEBUG_LL knobs
+    # survived olddefconfig (the decompressor prints "Uncompressing
+    # Linux..." from the first instruction only when CONFIG_DEBUG_LL=y).
+    grep -E '^CONFIG_(DEBUG_LL|DEBUG_LL_UART_PL01X|DEBUG_UART_PHYS|DEBUG_UART_VIRT|EARLY_PRINTK)' .config || true
+fi
 # Note: the kernel image target differs per arch (x86=bzImage, arm64=Image,
 # riscv=Image on 4.20+, vmlinux on 4.19, mips=vmlinux)
 make -j"$(nproc)" ARCH="$KARCH" CROSS_COMPILE="$CROSS" "$IMG" modules >/dev/null

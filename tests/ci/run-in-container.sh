@@ -245,12 +245,16 @@ if [ "$RUNTIME" = "true" ]; then
                      # machine presents no ATAG-capable machine ID it
                      # recognises: with -M virt the kernel hangs before
                      # any console output even with CONFIG_OF (fb2e0d9),
-                     # fully silent until the timeout.  vexpress-a15 is
-                     # the era-correct machine (multi_v7_defconfig has
-                     # CONFIG_ARCH_VEXPRESS=y on 3.10) and boots 3.10
-                     # reliably under QEMU 2.5.  4.4+ stay on virt.
+                     # fully silent until the timeout.  vexpress-a9 is
+                     # the era-classic 3.10 machine (multi_v7_defconfig
+                     # has CONFIG_ARCH_VEXPRESS=y on 3.10); its RAM bank
+                     # at 0x60000000 and the motherboard PL011 at
+                     # 0x1c090000 match the DEBUG_LL kernel built for
+                     # this row.  vexpress-a15 stayed just as silent
+                     # (64988ee), so a9 is the remaining era combination.
+                     # 4.4+ stay on virt.
                      if [ "$(printf '%s\n' "3.11" "$KVER" | sort -V | head -n1)" != "3.11" ]; then
-                         QEMU="qemu-system-arm -M vexpress-a15 -cpu cortex-a15"
+                         QEMU="qemu-system-arm -M vexpress-a9 -cpu cortex-a9"
                      else
                          QEMU="qemu-system-arm -M virt -cpu cortex-a15"
                      fi
@@ -259,8 +263,11 @@ if [ "$RUNTIME" = "true" ]; then
                      # 3.10 boots silent on vexpress too when it hangs
                      # early; the DEBUG_LL kernel (build-kernel.sh)
                      # prints from the first instruction with this.
+                     # 3.10's setup_early_printk only recognises the
+                     # explicit pl011,<phys> form - a bare "earlyprintk"
+                     # is silently ignored.
                      [ "$(printf '%s\n' "3.11" "$KVER" | sort -V | head -n1)" != "3.11" ] \
-                         && QAPPEND="earlyprintk" ;;
+                         && QAPPEND="earlyprintk=pl011,0x1c090000" ;;
             mips)    QEMU="qemu-system-mipsel -M malta"
                      KIMG="$KDIR/vmlinux"
                      CONSOLE="ttyS0"
@@ -401,6 +408,10 @@ PYEOF
         # fw_jump.bin + -kernel, since era QEMU rejects -append
         # without -kernel.
         [ -n "$KIMG" ] && KARG="-kernel $KIMG" || KARG=""
+        echo "QEMU-CMD: $QEMU ${QMEM:--m 1G} ${QEXTRA:-} $KARG" \
+             "-initrd /ir.cpio.gz" \
+             "-append console=$CONSOLE,115200 loglevel=8 panic=10 ${QAPPEND:-}" \
+             "-nographic -no-reboot"
         # shellcheck disable=SC2086
         timeout 420 $QEMU ${QMEM:--m 1G} ${QEXTRA:-} $KARG \
             -initrd /ir.cpio.gz \
