@@ -133,7 +133,16 @@ if [ "$KARCH" = "arm" ]; then
         # map), and DEBUG_LL_UART_PL01X / DEBUG_UART_PHYS arrive only
         # in 3.19+ (scripts/config would add orphan lines that
         # olddefconfig deletes).
-        ./scripts/config --enable DEBUG_KERNEL \
+        # ROOT CAUSE of the fully silent vexpress boot: 3.10's
+        # multi_v7_defconfig enables NONE of the machines QEMU 2.5
+        # can boot - no ARCH_VEXPRESS (its only vexpress line is the
+        # A5/A9 erratum comment) and no mach-virt support, so the
+        # kernel finds no machine_desc on vexpress-a9/-a15 and hangs
+        # before any output.  Enable ARCH_VEXPRESS explicitly (the
+        # port choice DEBUG_VEXPRESS_UART0_RS1 depends on it, which is
+        # why it previously lost the debug-port choice to zynq.S).
+        ./scripts/config --enable ARCH_VEXPRESS \
+                         --enable DEBUG_KERNEL \
                          --enable DEBUG_LL \
                          --enable DEBUG_VEXPRESS_UART0_RS1 \
                          --enable EARLY_PRINTK
