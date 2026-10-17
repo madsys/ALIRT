@@ -103,8 +103,10 @@ if [ "$KARCH" = "mips" ]; then
         # instructions freely.  v4.4 solved the same problem with
         # per-site SET_HARDFLOAT markers (GAS_HAS_SET_HARDFLOAT); for
         # 3.10 restore hardfloat assembly mode globally - every mips
-        # .S file includes asm.h before touching FP registers.
-        printf '\n/* gcc >= 4.9 forwards -msoft-float to gas, which then\n   rejects FP mnemonics tree-wide; era gas never saw the flag.\n   v4.4 fixed this with SET_HARDFLOAT markers - restore\n   hardfloat assembly mode globally instead. */\n\t.set\thardfloat\n' \
+        # .S file includes asm.h before touching FP registers.  asm.h is
+        # also #included from C (process.c et al), so gate the assembler
+        # directive on __ASSEMBLY__.
+        printf '\n/* gcc >= 4.9 forwards -msoft-float to gas, which then\n   rejects FP mnemonics tree-wide; era gas never saw the flag.\n   v4.4 fixed this with SET_HARDFLOAT markers - restore hardfloat\n   assembly mode globally instead. */\n#ifdef __ASSEMBLY__\n\t.set\thardfloat\n#endif\n' \
             >> arch/mips/include/asm/asm.h
     fi
 fi
