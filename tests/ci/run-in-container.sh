@@ -280,11 +280,20 @@ if [ "$RUNTIME" = "true" ]; then
             # where TCG has no TM at all and nothing needs disabling.
             powerpc) QBIN=qemu-system-ppc64
                      MACH=pseries
+                     # QEMU >= 3.0 defaults pseries to POWER9, whose TCG
+                     # model kills pre-4.19 kernels in early head code
+                     # ("qemu: fatal: Trying to deliver HV exception (MSR)
+                     # ... with no HV support", seen on 4.4.302 under
+                     # QEMU 4.2).  Pin POWER8 - the CPU QEMU <= 2.11
+                     # already defaulted to for pseries, and the
+                     # era-correct target for these kernels.
+                     [ "$(printf '%s\n' "4.19" "$KVER" | sort -V | head -n1)" != "4.19" ] \
+                         && CPUARG="-cpu POWER8" || CPUARG=""
                      QVER=$($QBIN --version | grep -o 'version [0-9]*\.[0-9]*' | grep -o '[0-9]*\.[0-9]*')
                      QMAJ=${QVER%%.*}; QMIN=${QVER##*.}
                      [ "$QMAJ" -gt 2 ] || { [ "$QMAJ" -eq 2 ] && [ "$QMIN" -ge 10 ]; } \
                          && MACH="$MACH,cap-htm=off"
-                     QEMU="$QBIN -M $MACH"
+                     QEMU="$QBIN -M $MACH ${CPUARG:-}"
                      KIMG="$KDIR/arch/powerpc/boot/zImage"
                      # SLOF in QEMU < 5.0 places the initrd right after
                      # the kernel image it loaded, sized from the ELF
