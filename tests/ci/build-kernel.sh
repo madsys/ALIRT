@@ -114,6 +114,22 @@ if (/^\s*EX\s+([ls]dc1)\s+\$f(\d+),\s*SC_FPREGS\+(\d+)\(a0\)\s*$/) {
   $_ = qq(\t.set\tpush\n\t.set\tnomacro\n$l: .word\t$w\n\t.set\tpop\n\t.section __ex_table,"a"\n\tPTR\t$l, fault\n\t.previous\n);
 }' \
             arch/mips/kernel/r4k_fpu.S
+        # The same o32 FP32 gate hits the fpu_save_double/fpu_restore_double
+        # macros in asmmacro-32.h (sdc1/ldc1 $fN, THREAD_FPRN(\thread),
+        # called from r4k_switch.S with \thread == a0).  Rewrite the
+        # macro bodies to emit the I-type .word encoding; the immediate
+        # stays the symbolic THREAD_FPRN (resolved from asm-offsets, so
+        # no offset is hardcoded).  Guard the base register: the rs
+        # field is encoded for a0 ($4), and .ifc aborts the assembly
+        # if a future call site passes another base instead of silently
+        # emitting a wrong rs field.
+        perl -i -pe '
+if (/^\t([ls]dc1)\t\$f(\d+),\s*(THREAD_FPR\d+)\(\\thread\)$/) {
+  my $op = ($1 eq "ldc1") ? 0x33 : 0x3F;
+  my $w = sprintf("0x%08x", $op << 26);
+  $_ = "\t.ifc \\thread, a0\n\t.word\t($w | (4 << 21) | ($2 << 16) | ($3))\n\t.else\n\t.abort\t\"alirt: $1 base != a0\"\n\t.endif\n";
+}' \
+            arch/mips/include/asm/asmmacro-32.h
     fi
 fi
 if [ "$KARCH" = "arm" ]; then
@@ -126,6 +142,16 @@ if [ "$KARCH" = "arm" ]; then
         # console output (fully silent boot until the QEMU timeout).
         # Later multi_v7 defconfigs enable OF themselves.
         ./scripts/config --enable OF --enable OF_FLATTREE
+        # The same silent hang needs observability: DEBUG_LL (PL011 at
+        # the vexpress motherboard UART physical address, used
+        # pre-MMU) + EARLY_PRINTK makes the decompressor and early
+        # boot emit on the serial line from the first instruction,
+        # via earlyprintk in the kernel command line.
+        ./scripts/config --enable DEBUG_LL \
+                         --enable DEBUG_LL_UART_PL01X \
+                         --set-val DEBUG_UART_PHYS 0x1c090000 \
+                         --set-val DEBUG_UART_VIRT 0xf8090000 \
+                         --enable EARLY_PRINTK
     fi
 fi
 # gcc-9 vs the 5.10 nfsd code trips a clamp() compiletime_assert in

@@ -255,7 +255,12 @@ if [ "$RUNTIME" = "true" ]; then
                          QEMU="qemu-system-arm -M virt -cpu cortex-a15"
                      fi
                      KIMG="$KDIR/arch/arm/boot/zImage"
-                     CONSOLE="ttyAMA0" ;;
+                     CONSOLE="ttyAMA0"
+                     # 3.10 boots silent on vexpress too when it hangs
+                     # early; the DEBUG_LL kernel (build-kernel.sh)
+                     # prints from the first instruction with this.
+                     [ "$(printf '%s\n' "3.11" "$KVER" | sort -V | head -n1)" != "3.11" ] \
+                         && QAPPEND="earlyprintk" ;;
             mips)    QEMU="qemu-system-mipsel -M malta"
                      KIMG="$KDIR/vmlinux"
                      CONSOLE="ttyS0"
