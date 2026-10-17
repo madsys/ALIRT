@@ -102,6 +102,8 @@ static struct mm_struct *alirt_mm_init_mm;
 
 /* defined below; the init-time self-test needs the prototype early */
 static inline bool alirt_addr_valid(unsigned long addr, size_t size);
+/* DIAG(ppc-skip-path): defined below; fallback self-test reporting. */
+static inline void alirt_walk_dbg(unsigned long addr);
 
 /*
  * Resolve init_mm through kallsyms.  @kln is a working
@@ -143,14 +145,23 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 		extern struct task_struct init_task;
 		struct mm_struct *mm = init_task.active_mm;
 
+		/* DIAG(ppc-skip-path): make the fallback self-test audible; the
+		 * pre-6.1 no-kprobe path relies on it exclusively and a silent
+		 * rejection degrades the scan to zero candidates. */
+		pr_warn("alirt: powerpc fallback: init_task.active_mm=%px current->active_mm=%px\n",
+			mm, current->active_mm);
 		if (mm) {
 			alirt_mm_init_mm = mm;
 #if defined(MODULE) && defined(THIS_MODULE)
 			if (THIS_MODULE &&
 			    !alirt_addr_valid((unsigned long)THIS_MODULE,
-					      sizeof(*THIS_MODULE)))
+					      sizeof(*THIS_MODULE))) {
 				alirt_mm_init_mm = NULL;
-			else
+				/* DIAG(ppc-skip-path): why did it reject? */
+				alirt_mm_init_mm = mm;
+				alirt_walk_dbg((unsigned long)THIS_MODULE);
+				alirt_mm_init_mm = NULL;
+			} else
 #endif
 				pr_warn("alirt: powerpc init_mm unresolvable; "
 					"using init_task.active_mm (&init_mm) "
@@ -285,6 +296,65 @@ end:
 		return true;
 
 	return alirt_addr_valid(end_addr + 1, size - (end_addr - addr + 1));
+}
+
+/* DIAG(ppc-skip-path): level-by-level walk report for the fallback
+ * self-test; delete once the pre-6.1 no-kprobe path is confirmed. */
+static inline void alirt_walk_dbg(unsigned long addr)
+{
+	pgd_t *pgd;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *pte;
+
+	pr_warn("alirt: walk %#lx via mm %px pgd %px\n", addr,
+		alirt_mm_init_mm, alirt_mm_init_mm ? alirt_mm_init_mm->pgd : NULL);
+	if (!alirt_mm_init_mm)
+		return;
+	pgd = pgd_offset(alirt_mm_init_mm, addr);
+	pr_warn("alirt: pgd[%lu]=%#llx none=%d present=%d\n",
+		(unsigned long)pgd_index(addr),
+		(unsigned long long)pgd_val(*pgd),
+		!!pgd_none(*pgd), !!pgd_present(*pgd));
+	if (pgd_none(*pgd) || !pgd_present(*pgd))
+		return;
+#if defined(CONFIG_PPC_BOOK3S_64) && \
+	LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0)
+	{
+		p4d_t *p4d = p4d_offset(pgd, addr);
+
+		pr_warn("alirt: p4d=%#llx none=%d present=%d\n",
+			(unsigned long long)p4d_val(*p4d),
+			!!p4d_none(*p4d), !!p4d_present(*p4d));
+		if (p4d_none(*p4d) || !p4d_present(*p4d))
+			return;
+		pud = pud_offset(p4d, addr);
+	}
+#else
+	pud = pud_offset(pgd, addr);
+#endif
+	pr_warn("alirt: pud=%#llx none=%d present=%d\n",
+		(unsigned long long)pud_val(*pud),
+		!!pud_none(*pud), !!pud_present(*pud));
+	if (pud_none(*pud) || !pud_present(*pud))
+		return;
+#if defined(CONFIG_PPC_BOOK3S_64) && \
+	LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+	pr_warn("alirt: pud_leaf=%d\n", !!alirt_pud_leaf(*pud));
+#endif
+	pmd = pmd_offset(pud, addr);
+	pr_warn("alirt: pmd=%#llx none=%d present=%d\n",
+		(unsigned long long)pmd_val(*pmd),
+		!!pmd_none(*pmd), !!pmd_present(*pmd));
+	if (pmd_none(*pmd) || !pmd_present(*pmd))
+		return;
+#if defined(CONFIG_PPC_BOOK3S_64) && \
+	LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+	pr_warn("alirt: pmd_leaf=%d\n", !!alirt_pmd_leaf(*pmd));
+#endif
+	pte = pte_offset_kernel(pmd, addr);
+	pr_warn("alirt: pte=%#llx present=%d\n",
+		(unsigned long long)pte_val(*pte), !!pte_present(*pte));
 }
 
 /*
