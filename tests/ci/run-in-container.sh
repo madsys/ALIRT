@@ -284,11 +284,14 @@ if [ "$RUNTIME" = "true" ]; then
                      # model kills pre-4.19 kernels in early head code
                      # ("qemu: fatal: Trying to deliver HV exception (MSR)
                      # ... with no HV support", seen on 4.4.302 under
-                     # QEMU 4.2).  Pin POWER8 - the CPU QEMU <= 2.11
-                     # already defaulted to for pseries, and the
-                     # era-correct target for these kernels.
+                     # QEMU 4.2).  POWER8 on 4.2 gets past that but still
+                     # dies silently right after "Booting from memory...";
+                     # POWER7 is the CPU QEMU <= 3.0 actually defaulted
+                     # to for pseries, matches the era (4.4 predates
+                     # POWER8 bring-up), and its TCG model is the
+                     # oldest/most exercised in QEMU 4.2.
                      [ "$(printf '%s\n' "4.19" "$KVER" | sort -V | head -n1)" != "4.19" ] \
-                         && CPUARG="-cpu POWER8" || CPUARG=""
+                         && CPUARG="-cpu POWER7" || CPUARG=""
                      QVER=$($QBIN --version | grep -o 'version [0-9]*\.[0-9]*' | grep -o '[0-9]*\.[0-9]*')
                      QMAJ=${QVER%%.*}; QMIN=${QVER##*.}
                      [ "$QMAJ" -gt 2 ] || { [ "$QMAJ" -eq 2 ] && [ "$QMIN" -ge 10 ]; } \
