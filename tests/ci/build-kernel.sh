@@ -125,10 +125,17 @@ if [ "$KARCH" = "arm" ]; then
         # pre-MMU) + EARLY_PRINTK makes the decompressor and early
         # boot emit on the serial line from the first instruction,
         # via earlyprintk in the kernel command line.
-        ./scripts/config --enable DEBUG_LL \
-                         --enable DEBUG_LL_UART_PL01X \
-                         --set-val DEBUG_UART_PHYS 0x1c090000 \
-                         --set-val DEBUG_UART_VIRT 0xf8090000 \
+        # Era-correct 3.10 symbols: DEBUG_LL depends on DEBUG_KERNEL
+        # (multi_v7_defconfig does not set it - without it olddefconfig
+        # silently drops DEBUG_LL, EARLY_PRINTK and the whole choice;
+        # observed as a fully silent guest), the port choice is
+        # DEBUG_VEXPRESS_UART0_RS1 (0x1c090000, QEMU's RS1 vexpress
+        # map), and DEBUG_LL_UART_PL01X / DEBUG_UART_PHYS arrive only
+        # in 3.19+ (scripts/config would add orphan lines that
+        # olddefconfig deletes).
+        ./scripts/config --enable DEBUG_KERNEL \
+                         --enable DEBUG_LL \
+                         --enable DEBUG_VEXPRESS_UART0_RS1 \
                          --enable EARLY_PRINTK
     fi
 fi
