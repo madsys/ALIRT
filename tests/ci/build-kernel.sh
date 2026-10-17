@@ -169,6 +169,23 @@ if [ "$KARCH" = "arm" ] && [ "$(printf '%s\n' "3.11" "$KVER" | sort -V | head -n
 fi
 # Note: the kernel image target differs per arch (x86=bzImage, arm64=Image,
 # riscv=Image on 4.20+, vmlinux on 4.19, mips=vmlinux)
-make -j"$(nproc)" ARCH="$KARCH" CROSS_COMPILE="$CROSS" "$IMG" modules >/dev/null
+# Capture the full build log: 3.10-armv7 once "finished" in 35s with no
+# error text because make's stdout was discarded - QEMU then booted an
+# empty zImage image silently (load_image_targphys reports success for a
+# 0-byte file, so no "could not load kernel" error appears either).
+if ! make -j"$(nproc)" ARCH="$KARCH" CROSS_COMPILE="$CROSS" "$IMG" modules >kbuild.log 2>&1; then
+    echo "BUILD-RESULT: FAIL (kernel make)"
+    tail -40 kbuild.log
+    exit 1
+fi
+if [ "$KARCH" = "arm" ] && [ "$(printf '%s\n' "3.11" "$KVER" | sort -V | head -n1)" != "3.11" ]; then
+    # 3.10's multi_v7 vexpress support is DT-boot-only (DT_MACHINE_START),
+    # but QEMU 2.5's vexpress passes ATAGS in r2 (no get_dtb hook): the
+    # row boots the kernel with an explicit -dtb instead, so build the
+    # blobs (dtb-$(CONFIG_ARCH_VEXPRESS) lists vexpress-v2p-ca9.dtb).
+    make ARCH="$KARCH" CROSS_COMPILE="$CROSS" dtbs >>kbuild.log 2>&1 \
+        || { echo "BUILD-RESULT: FAIL (dtbs)"; tail -20 kbuild.log; exit 1; }
+    ls -l arch/arm/boot/dts/vexpress-v2p-ca9.dtb
+fi
 
 echo "Kernel build finished: $(pwd)"

@@ -75,6 +75,13 @@ jobs:
           # book3s DABR emulation in QEMU 3.0.  20.04 ships QEMU 4.2,
           # which emulates the register; the SLOF initrd workaround
           # (QEMU < 5.0) and cap-htm=off both still apply there.
+          # DECLARED LIMITATION: the 4.4 ppc64le guest never produces a
+          # single byte after SLOF's "Booting from memory..." under ANY
+          # era TCG combination tried - 16.04/QEMU 2.5, 18.04/2.11,
+          # 20.04/4.2, each with POWER9/POWER8/POWER7, with and without
+          # the initrd, LE (BE dies inside SLOF itself).  Not a kernel
+          # config issue (20.04+POWER7+QEMU 4.2 is kept as the recorded
+          # attempt); the row stays red until a TCG model boots it.
           - { kver: "4.4.302",  image: "ubuntu:20.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
           - { kver: "4.19.325", image: "ubuntu:18.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
           - { kver: "5.4.290",  image: "ubuntu:20.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }

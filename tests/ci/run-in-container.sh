@@ -266,8 +266,17 @@ if [ "$RUNTIME" = "true" ]; then
                      # 3.10's setup_early_printk only recognises the
                      # explicit pl011,<phys> form - a bare "earlyprintk"
                      # is silently ignored.
-                     [ "$(printf '%s\n' "3.11" "$KVER" | sort -V | head -n1)" != "3.11" ] \
-                         && QAPPEND="earlyprintk=pl011,0x1c090000" ;;
+                     if [ "$(printf '%s\n' "3.11" "$KVER" | sort -V | head -n1)" != "3.11" ]; then
+                         QAPPEND="earlyprintk=pl011,0x1c090000"
+                         # QEMU 2.5's vexpress passes ATAGS in r2 (it has
+                         # no DTB-generation hook), but 3.10's multi_v7
+                         # vexpress support is DT_MACHINE_START only - an
+                         # explicit -dtb hands the kernel a device tree
+                         # (build-kernel.sh builds the blob).  Also pin
+                         # the board id fixup: without a DTB QEMU pokes
+                         # board_id 0x8e0 into the image.
+                         QEXTRA="-dtb $KDIR/arch/arm/boot/dts/vexpress-v2p-ca9.dtb"
+                     fi ;;
             mips)    QEMU="qemu-system-mipsel -M malta"
                      KIMG="$KDIR/vmlinux"
                      CONSOLE="ttyS0"
@@ -292,9 +301,6 @@ if [ "$RUNTIME" = "true" ]; then
                      # oldest/most exercised in QEMU 4.2.
                      [ "$(printf '%s\n' "4.19" "$KVER" | sort -V | head -n1)" != "4.19" ] \
                          && CPUARG="-cpu POWER7" || CPUARG=""
-                     # DIAG(probe): see the QEMU invocation below.
-                     [ "$(printf '%s\n' "4.19" "$KVER" | sort -V | head -n1)" != "4.19" ] \
-                         && SKIP_INITRD=yes
                      QVER=$($QBIN --version | grep -o 'version [0-9]*\.[0-9]*' | grep -o '[0-9]*\.[0-9]*')
                      QMAJ=${QVER%%.*}; QMIN=${QVER##*.}
                      [ "$QMAJ" -gt 2 ] || { [ "$QMAJ" -eq 2 ] && [ "$QMIN" -ge 10 ]; } \
@@ -423,16 +429,17 @@ PYEOF
         # fw_jump.bin + -kernel, since era QEMU rejects -append
         # without -kernel.
         [ -n "$KIMG" ] && KARG="-kernel $KIMG" || KARG=""
-        # DIAG(probe): pre-4.19 powerpc dies silently right after SLOF
-        # hands off, with zero kernel output, on every TCG/QEMU/CPU tried
-        # (2.5/2.11/4.2 x POWER9/8/7).  Boot the probe WITHOUT the
-        # initrd: reaching "Kernel panic - not syncing: No init found"
-        # or any kernel banner proves the kernel starts and the fault
-        # is initrd placement; still zero output means the 4.4 LE guest
-        # never starts under TCG (declared limitation).  The job fails
-        # either way; this is only about the console evidence.
+        # DECLARED LIMITATION (4.4 powerpc): the ppc64le guest never
+        # emits a byte after SLOF "Booting from memory..." under any era
+        # TCG combination (2.5/2.11/4.2 x POWER9/8/7, with and without
+        # initrd, LE) - see the matrix comment in ci.yml.
         IRARG="-initrd /ir.cpio.gz"
-        [ "${SKIP_INITRD:-no}" = "yes" ] && IRARG=""
+        # Boot-image sanity: QEMU's load_image_targphys reports success on
+        # a 0-byte file, so an empty/missing kernel image used to boot as a
+        # totally silent guest (seen on 3.10-armv7: "finished" build that
+        # never linked, 7 minutes of dead silence, no QEMU error).
+        ls -l $KIMG
+        [ -s "$KIMG" ] || { echo "RUNTIME-RESULT: FAIL (kernel image missing/empty)"; exit 1; }
         echo "QEMU-CMD: $QEMU ${QMEM:--m 1G} ${QEXTRA:-} $KARG" \
              "$IRARG" \
              "-append console=$CONSOLE,115200 loglevel=8 panic=10 ${QAPPEND:-}" \
