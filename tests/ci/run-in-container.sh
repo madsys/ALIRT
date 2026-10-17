@@ -292,6 +292,9 @@ if [ "$RUNTIME" = "true" ]; then
                      # oldest/most exercised in QEMU 4.2.
                      [ "$(printf '%s\n' "4.19" "$KVER" | sort -V | head -n1)" != "4.19" ] \
                          && CPUARG="-cpu POWER7" || CPUARG=""
+                     # DIAG(probe): see the QEMU invocation below.
+                     [ "$(printf '%s\n' "4.19" "$KVER" | sort -V | head -n1)" != "4.19" ] \
+                         && SKIP_INITRD=yes
                      QVER=$($QBIN --version | grep -o 'version [0-9]*\.[0-9]*' | grep -o '[0-9]*\.[0-9]*')
                      QMAJ=${QVER%%.*}; QMIN=${QVER##*.}
                      [ "$QMAJ" -gt 2 ] || { [ "$QMAJ" -eq 2 ] && [ "$QMIN" -ge 10 ]; } \
@@ -420,13 +423,23 @@ PYEOF
         # fw_jump.bin + -kernel, since era QEMU rejects -append
         # without -kernel.
         [ -n "$KIMG" ] && KARG="-kernel $KIMG" || KARG=""
+        # DIAG(probe): pre-4.19 powerpc dies silently right after SLOF
+        # hands off, with zero kernel output, on every TCG/QEMU/CPU tried
+        # (2.5/2.11/4.2 x POWER9/8/7).  Boot the probe WITHOUT the
+        # initrd: reaching "Kernel panic - not syncing: No init found"
+        # or any kernel banner proves the kernel starts and the fault
+        # is initrd placement; still zero output means the 4.4 LE guest
+        # never starts under TCG (declared limitation).  The job fails
+        # either way; this is only about the console evidence.
+        IRARG="-initrd /ir.cpio.gz"
+        [ "${SKIP_INITRD:-no}" = "yes" ] && IRARG=""
         echo "QEMU-CMD: $QEMU ${QMEM:--m 1G} ${QEXTRA:-} $KARG" \
-             "-initrd /ir.cpio.gz" \
+             "$IRARG" \
              "-append console=$CONSOLE,115200 loglevel=8 panic=10 ${QAPPEND:-}" \
              "-nographic -no-reboot"
         # shellcheck disable=SC2086
         timeout 420 $QEMU ${QMEM:--m 1G} ${QEXTRA:-} $KARG \
-            -initrd /ir.cpio.gz \
+            $IRARG \
             -append "console=$CONSOLE,115200 loglevel=8 panic=10 ${QAPPEND:-}" \
             -nographic -no-reboot 2>&1 | tee /src/vm-console.log
     fi
