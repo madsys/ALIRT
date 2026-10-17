@@ -46,7 +46,13 @@ jobs:
           - { kver: "6.18.56",  image: "ubuntu:24.04", arch: "aarch64", runtime: true, qarch: "aarch64", tag: "-rt" }
           - { kver: "7.2.10",   image: "ubuntu:24.04", arch: "aarch64", runtime: true, qarch: "aarch64", tag: "-rt" }
           # armv7
-          - { kver: "3.10.108", image: "ubuntu:16.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
+          # 3.10 on 16.04/QEMU 2.5: valid 2MB zImage + DEBUG_LL
+          # (debug/vexpress.S, RS1 0x1c090000) + explicit -dtb, yet the
+          # guest never prints a byte in 7 minutes - the kernel never
+          # starts executing on QEMU 2.5's vexpress-a9.  Trying 20.04 /
+          # QEMU 4.2 (kernelci historically booted 3.10 on vexpress-a9
+          # under 4.x); gcc-9 cross build of 3.10 arm is part of the test.
+          - { kver: "3.10.108", image: "ubuntu:20.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
           - { kver: "4.4.302",  image: "ubuntu:16.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
           - { kver: "4.19.325", image: "ubuntu:18.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
           - { kver: "5.4.290",  image: "ubuntu:20.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
