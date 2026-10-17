@@ -110,44 +110,6 @@ if [ "$KARCH" = "mips" ]; then
             >> arch/mips/include/asm/asm.h
     fi
 fi
-if [ "$KARCH" = "arm" ]; then
-    if [ "$(printf '%s\n' "3.11" "$KVER" | sort -V | head -n1)" != "3.11" ]; then
-        # multi_v7_defconfig on 3.10 has no CONFIG_OF - only
-        # ARM_APPENDED_DTB, and the CI passes no appended DTB.
-        # QEMU's virt machine describes itself ONLY with a DTB in
-        # r2 (no ATAGS), so without CONFIG_OF the 3.10 kernel finds
-        # neither ATAGS nor a machine_desc and hangs before any
-        # console output (fully silent boot until the QEMU timeout).
-        # Later multi_v7 defconfigs enable OF themselves.
-        ./scripts/config --enable OF --enable OF_FLATTREE
-        # The same silent hang needs observability: DEBUG_LL (PL011 at
-        # the vexpress motherboard UART physical address, used
-        # pre-MMU) + EARLY_PRINTK makes the decompressor and early
-        # boot emit on the serial line from the first instruction,
-        # via earlyprintk in the kernel command line.
-        # Era-correct 3.10 symbols: DEBUG_LL depends on DEBUG_KERNEL
-        # (multi_v7_defconfig does not set it - without it olddefconfig
-        # silently drops DEBUG_LL, EARLY_PRINTK and the whole choice;
-        # observed as a fully silent guest), the port choice is
-        # DEBUG_VEXPRESS_UART0_RS1 (0x1c090000, QEMU's RS1 vexpress
-        # map), and DEBUG_LL_UART_PL01X / DEBUG_UART_PHYS arrive only
-        # in 3.19+ (scripts/config would add orphan lines that
-        # olddefconfig deletes).
-        # ROOT CAUSE of the fully silent vexpress boot: 3.10's
-        # multi_v7_defconfig enables NONE of the machines QEMU 2.5
-        # can boot - no ARCH_VEXPRESS (its only vexpress line is the
-        # A5/A9 erratum comment) and no mach-virt support, so the
-        # kernel finds no machine_desc on vexpress-a9/-a15 and hangs
-        # before any output.  Enable ARCH_VEXPRESS explicitly (the
-        # port choice DEBUG_VEXPRESS_UART0_RS1 depends on it, which is
-        # why it previously lost the debug-port choice to zynq.S).
-        ./scripts/config --enable ARCH_VEXPRESS \
-                         --enable DEBUG_KERNEL \
-                         --enable DEBUG_LL \
-                         --enable DEBUG_VEXPRESS_UART0_RS1 \
-                         --enable EARLY_PRINTK
-    fi
-fi
 # gcc-9 vs the 5.10 nfsd code trips a clamp() compiletime_assert in
 # fs/nfsd/nfs4state.c; nothing in ALIRT needs the NFS server.
 ./scripts/config --disable NFSD
@@ -161,12 +123,6 @@ if [ "$KARCH" = "powerpc" ]; then
     ./scripts/config --disable CPU_BIG_ENDIAN --enable CPU_LITTLE_ENDIAN
 fi
 make ARCH="$KARCH" CROSS_COMPILE="$CROSS" olddefconfig >/dev/null
-if [ "$KARCH" = "arm" ] && [ "$(printf '%s\n' "3.11" "$KVER" | sort -V | head -n1)" != "3.11" ]; then
-    # 3.10 vexpress boot-silence observability: prove the DEBUG_LL knobs
-    # survived olddefconfig (the decompressor prints "Uncompressing
-    # Linux..." from the first instruction only when CONFIG_DEBUG_LL=y).
-    grep -E '^CONFIG_(DEBUG_LL|DEBUG_LL_UART_PL01X|DEBUG_UART_PHYS|DEBUG_UART_VIRT|EARLY_PRINTK)' .config || true
-fi
 # Note: the kernel image target differs per arch (x86=bzImage, arm64=Image,
 # riscv=Image on 4.20+, vmlinux on 4.19, mips=vmlinux)
 # Capture the full build log: 3.10-armv7 once "finished" in 35s with no
@@ -177,15 +133,6 @@ if ! make -j"$(nproc)" ARCH="$KARCH" CROSS_COMPILE="$CROSS" "$IMG" modules >kbui
     echo "BUILD-RESULT: FAIL (kernel make)"
     tail -40 kbuild.log
     exit 1
-fi
-if [ "$KARCH" = "arm" ] && [ "$(printf '%s\n' "3.11" "$KVER" | sort -V | head -n1)" != "3.11" ]; then
-    # 3.10's multi_v7 vexpress support is DT-boot-only (DT_MACHINE_START),
-    # but QEMU 2.5's vexpress passes ATAGS in r2 (no get_dtb hook): the
-    # row boots the kernel with an explicit -dtb instead, so build the
-    # blobs (dtb-$(CONFIG_ARCH_VEXPRESS) lists vexpress-v2p-ca9.dtb).
-    make ARCH="$KARCH" CROSS_COMPILE="$CROSS" dtbs >>kbuild.log 2>&1 \
-        || { echo "BUILD-RESULT: FAIL (dtbs)"; tail -20 kbuild.log; exit 1; }
-    ls -l arch/arm/boot/dts/vexpress-v2p-ca9.dtb
 fi
 
 echo "Kernel build finished: $(pwd)"

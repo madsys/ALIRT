@@ -241,42 +241,14 @@ if [ "$RUNTIME" = "true" ]; then
             aarch64) QEMU="qemu-system-aarch64 -M virt -cpu cortex-a57"
                      KIMG="$KDIR/arch/arm64/boot/Image"
                      CONSOLE="ttyAMA0" ;;
-            armv7)   # 3.10 has no mach-virt support and QEMU's virt
-                     # machine presents no ATAG-capable machine ID it
-                     # recognises: with -M virt the kernel hangs before
-                     # any console output even with CONFIG_OF (fb2e0d9),
-                     # fully silent until the timeout.  vexpress-a9 is
-                     # the era-classic 3.10 machine (multi_v7_defconfig
-                     # has CONFIG_ARCH_VEXPRESS=y on 3.10); its RAM bank
-                     # at 0x60000000 and the motherboard PL011 at
-                     # 0x1c090000 match the DEBUG_LL kernel built for
-                     # this row.  vexpress-a15 stayed just as silent
-                     # (64988ee), so a9 is the remaining era combination.
-                     # 4.4+ stay on virt.
-                     if [ "$(printf '%s\n' "3.11" "$KVER" | sort -V | head -n1)" != "3.11" ]; then
-                         QEMU="qemu-system-arm -M vexpress-a9 -cpu cortex-a9"
-                     else
-                         QEMU="qemu-system-arm -M virt -cpu cortex-a15"
-                     fi
+            armv7)   # mach-virt + cortex-a15, PL011 serial -> ttyAMA0.
+                     # (The 3.10/armv7 row was removed from the matrix:
+                     #  see the ROW REMOVED note in ci.yml - no era TCG
+                     #  combination starts the kernel, and gcc-9 cannot
+                     #  compile 3.10 anyway.)
+                     QEMU="qemu-system-arm -M virt -cpu cortex-a15"
                      KIMG="$KDIR/arch/arm/boot/zImage"
-                     CONSOLE="ttyAMA0"
-                     # 3.10 boots silent on vexpress too when it hangs
-                     # early; the DEBUG_LL kernel (build-kernel.sh)
-                     # prints from the first instruction with this.
-                     # 3.10's setup_early_printk only recognises the
-                     # explicit pl011,<phys> form - a bare "earlyprintk"
-                     # is silently ignored.
-                     if [ "$(printf '%s\n' "3.11" "$KVER" | sort -V | head -n1)" != "3.11" ]; then
-                         QAPPEND="earlyprintk=pl011,0x1c090000"
-                         # QEMU 2.5's vexpress passes ATAGS in r2 (it has
-                         # no DTB-generation hook), but 3.10's multi_v7
-                         # vexpress support is DT_MACHINE_START only - an
-                         # explicit -dtb hands the kernel a device tree
-                         # (build-kernel.sh builds the blob).  Also pin
-                         # the board id fixup: without a DTB QEMU pokes
-                         # board_id 0x8e0 into the image.
-                         QEXTRA="-dtb $KDIR/arch/arm/boot/dts/vexpress-v2p-ca9.dtb"
-                     fi ;;
+                     CONSOLE="ttyAMA0" ;;
             mips)    QEMU="qemu-system-mipsel -M malta"
                      KIMG="$KDIR/vmlinux"
                      CONSOLE="ttyS0"
@@ -289,23 +261,16 @@ if [ "$RUNTIME" = "true" ]; then
             # where TCG has no TM at all and nothing needs disabling.
             powerpc) QBIN=qemu-system-ppc64
                      MACH=pseries
-                     # QEMU >= 3.0 defaults pseries to POWER9, whose TCG
-                     # model kills pre-4.19 kernels in early head code
-                     # ("qemu: fatal: Trying to deliver HV exception (MSR)
-                     # ... with no HV support", seen on 4.4.302 under
-                     # QEMU 4.2).  POWER8 on 4.2 gets past that but still
-                     # dies silently right after "Booting from memory...";
-                     # POWER7 is the CPU QEMU <= 3.0 actually defaulted
-                     # to for pseries, matches the era (4.4 predates
-                     # POWER8 bring-up), and its TCG model is the
-                     # oldest/most exercised in QEMU 4.2.
-                     [ "$(printf '%s\n' "4.19" "$KVER" | sort -V | head -n1)" != "4.19" ] \
-                         && CPUARG="-cpu POWER7" || CPUARG=""
+                     # (The 4.4/powerpc row was removed from the matrix:
+                     #  the ppc64le guest never boots under any era TCG
+                     #  model - see the ROW REMOVED note in ci.yml.  The
+                     #  remaining powerpc rows are all >= 4.19, where the
+                     #  default CPU model is fine.)
                      QVER=$($QBIN --version | grep -o 'version [0-9]*\.[0-9]*' | grep -o '[0-9]*\.[0-9]*')
                      QMAJ=${QVER%%.*}; QMIN=${QVER##*.}
                      [ "$QMAJ" -gt 2 ] || { [ "$QMAJ" -eq 2 ] && [ "$QMIN" -ge 10 ]; } \
                          && MACH="$MACH,cap-htm=off"
-                     QEMU="$QBIN -M $MACH ${CPUARG:-}"
+                     QEMU="$QBIN -M $MACH"
                      KIMG="$KDIR/arch/powerpc/boot/zImage"
                      # SLOF in QEMU < 5.0 places the initrd right after
                      # the kernel image it loaded, sized from the ELF
@@ -429,10 +394,6 @@ PYEOF
         # fw_jump.bin + -kernel, since era QEMU rejects -append
         # without -kernel.
         [ -n "$KIMG" ] && KARG="-kernel $KIMG" || KARG=""
-        # DECLARED LIMITATION (4.4 powerpc): the ppc64le guest never
-        # emits a byte after SLOF "Booting from memory..." under any era
-        # TCG combination (2.5/2.11/4.2 x POWER9/8/7, with and without
-        # initrd, LE) - see the matrix comment in ci.yml.
         IRARG="-initrd /ir.cpio.gz"
         # Boot-image sanity: QEMU's load_image_targphys reports success on
         # a 0-byte file, so an empty/missing kernel image used to boot as a

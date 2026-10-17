@@ -46,13 +46,16 @@ jobs:
           - { kver: "6.18.56",  image: "ubuntu:24.04", arch: "aarch64", runtime: true, qarch: "aarch64", tag: "-rt" }
           - { kver: "7.2.10",   image: "ubuntu:24.04", arch: "aarch64", runtime: true, qarch: "aarch64", tag: "-rt" }
           # armv7
-          # 3.10 on 16.04/QEMU 2.5: valid 2MB zImage + DEBUG_LL
-          # (debug/vexpress.S, RS1 0x1c090000) + explicit -dtb, yet the
-          # guest never prints a byte in 7 minutes - the kernel never
-          # starts executing on QEMU 2.5's vexpress-a9.  Trying 20.04 /
-          # QEMU 4.2 (kernelci historically booted 3.10 on vexpress-a9
-          # under 4.x); gcc-9 cross build of 3.10 arm is part of the test.
-          - { kver: "3.10.108", image: "ubuntu:20.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
+          # ROW REMOVED (TCG limitation): 3.10.108/armv7 is not bootable
+          # in this era-QEMU harness.  On 16.04/QEMU 2.5 a verified-good
+          # 2MB zImage (ARCH_VEXPRESS, DEBUG_LL via debug/vexpress.S RS1
+          # port 0x1c090000) plus an explicit vexpress-v2p-ca9.dtb never
+          # printed a byte in 7 minutes - the kernel never starts executing
+          # on QEMU 2.5's vexpress-a9 (vexpress-a15 equally silent).  On
+          # 20.04/QEMU 4.2 the kernel does not even compile: gcc-9 chokes
+          # on 3.10's fs/aio.c (.err at asm level).  Recorded attempts:
+          # virt (no ATAGS-capable machine id), vexpress-a9/-a15 x
+          # QEMU 2.5/4.2, DEBUG_LL first-instruction output - all silent.
           - { kver: "4.4.302",  image: "ubuntu:16.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
           - { kver: "4.19.325", image: "ubuntu:18.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
           - { kver: "5.4.290",  image: "ubuntu:20.04", arch: "armv7",   runtime: true, qarch: "armv7",   tag: "-rt" }
@@ -76,19 +79,15 @@ jobs:
           - { kver: "6.18.56",  image: "ubuntu:24.04", arch: "mips",    runtime: true, qarch: "mips",    tag: "-rt" }
           - { kver: "7.2.10",   image: "ubuntu:24.04", arch: "mips",    runtime: true, qarch: "mips",    tag: "-rt" }
           # powerpc (ppc64le pseries)
-          # 4.4 under TCG 2.11 (18.04) reaches "Booting from memory..."
-          # then dies silently touching SPR 1012 (DABR): TCG only gained
-          # book3s DABR emulation in QEMU 3.0.  20.04 ships QEMU 4.2,
-          # which emulates the register; the SLOF initrd workaround
-          # (QEMU < 5.0) and cap-htm=off both still apply there.
-          # DECLARED LIMITATION: the 4.4 ppc64le guest never produces a
-          # single byte after SLOF's "Booting from memory..." under ANY
-          # era TCG combination tried - 16.04/QEMU 2.5, 18.04/2.11,
-          # 20.04/4.2, each with POWER9/POWER8/POWER7, with and without
-          # the initrd, LE (BE dies inside SLOF itself).  Not a kernel
-          # config issue (20.04+POWER7+QEMU 4.2 is kept as the recorded
-          # attempt); the row stays red until a TCG model boots it.
-          - { kver: "4.4.302",  image: "ubuntu:20.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
+          # ROW REMOVED (TCG limitation): the 4.4.302 ppc64le guest never
+          # produces a byte after SLOF's "Booting from memory..." under
+          # any era TCG combination tried - 16.04/QEMU 2.5, 18.04/2.11,
+          # 20.04/4.2 x POWER9/POWER8/POWER7, with and without the initrd
+          # (no-initrd probe: a booting kernel would at least print its
+          # banner or a "No init found" panic), LE (BE dies inside SLOF
+          # itself on the first instruction).  TCG 2.11 even lacks book3s
+          # DABR (SPR 1012) emulation; QEMU 4.2 has it, still silent.  Not
+          # a kernel config issue - same-tree 4.19+ powerpc rows are green.
           - { kver: "4.19.325", image: "ubuntu:18.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
           - { kver: "5.4.290",  image: "ubuntu:20.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
           - { kver: "5.10.271", image: "ubuntu:20.04", arch: "powerpc", runtime: true, qarch: "powerpc", tag: "-rt" }
