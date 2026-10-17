@@ -291,35 +291,15 @@ static inline int alirt_resolve_kln(unsigned long (**kln)(const char *name))
 	*kln = kallsyms_lookup_name;
 	return 0;
 #else
-/*
- * ppc64 ELFv2, 5.7 <= version < 6.1: skip the kprobe path entirely.
- * CONFIG_PPC64_ELF_ABI_V2 only exists since 6.1, so the era-correct
- * ELFv2 test below is CPU_LITTLE_ENDIAN (every LE ppc64 build is ELFv2;
- * big-endian was ELFv1 until the explicit 6.1 choice arrived, and CI
- * builds LE exclusively via build-kernel.sh).
- *
- * Why only pre-6.1: on 6.1+ the kprobe path below plus the global-entry
- * scan demonstrably resolves a callable kallsyms_lookup_name (matrix
- * green since v0.6.0), but on 5.10.271/5.15.180 kp.addr resolves an
- * address that is not safe to CALL from a module (observed oops inside
- * kallsyms_lookup_name at +0x44/+0x30, module TOC still in r2: with
- * KPROBES_ON_FTRACE kp.addr can be the ftrace site and the GE scan
- * finds no callable prologue).  The parser-wrapper below never calls
- * kernel text; its gaps on this path are closed arch-side: the module
- * list head reaches the caller through the "modules" shadow in
- * alirt_kln_lookup(), and init_mm through init_task.active_mm (see
- * src/arch/powerpc/alirt_mm.h).
- */
-#if defined(CONFIG_PPC64) && defined(CONFIG_CPU_LITTLE_ENDIAN) && \
-	LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
-	*kln = alirt_kln_lookup;
-	return 0;
-#endif
 	/*
-	 * >= 5.7 (non-ppc64, or ppc64 >= 6.1): prefer the /proc/kallsyms
-	 * parser whenever it works.  The parser needs nothing but the
-	 * symbol table, which is intact when root inserts the module.
-	 * Pre-6.1 ppc64 never reaches this point (skipped above).
+	 * >= 5.7 (every arch, ppc64 included since the skip was lifted):
+	 * prefer the /proc/kallsyms parser whenever it works.  The parser
+	 * needs nothing but the symbol table, which is intact when root
+	 * inserts the module.  On >= 5.9 the kernel_read below is refused
+	 * for procfs, so this silently yields nothing and the kprobe path
+	 * takes over - on pre-6.1 ppc64 that is exactly what un-breaks
+	 * init_mm resolution, provided the global-entry scan below finds a
+	 * callable prologue (it logs the surrounding words when it does not).
 	 */
 	if (alirt_ks_lookup("kallsyms_lookup_name")) {
 		*kln = alirt_kln_lookup;
@@ -340,9 +320,10 @@ static inline int alirt_resolve_kln(unsigned long (**kln)(const char *name))
 	if (ret < 0)
 		return ret;
 	*kln = (unsigned long (*)(const char *name))kp.addr;
-#if defined(CONFIG_PPC64) && defined(CONFIG_PPC64_ELF_ABI_V2)
 	/*
-	 * ppc64 ELFv2: kprobe_lookup_name() (arch/powerpc/kernel/kprobes.c)
+	 * ppc64 ELFv2 (6.1+: CONFIG_PPC64_ELF_ABI_V2; 5.7 ~ 6.0 LE builds are
+	 * ELFv2 as well, the config only arrived with the explicit 6.1
+	 * choice): kprobe_lookup_name() (arch/powerpc/kernel/kprobes.c)
 	 * hands back any of three values:
 	 *   - the LOCAL entry point  (ppc_function_entry() skipping the GE),
 	 *   - the ftrace site        (with CONFIG_KPROBES_ON_FTRACE; the
@@ -369,6 +350,10 @@ static inline int alirt_resolve_kln(unsigned long (**kln)(const char *name))
 	 * bytes ahead).  Backward matches win; when nothing matches, refuse
 	 * to call the unresolved address instead of crashing the machine.
 	 */
+#if defined(CONFIG_PPC64) && \
+	(defined(CONFIG_PPC64_ELF_ABI_V2) || \
+	 (defined(CONFIG_CPU_LITTLE_ENDIAN) && \
+	  LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)))
 	{
 		unsigned long a = (unsigned long)*kln & ~3UL;
 		unsigned long lo = a >= 32 ? a - 32 : 0;

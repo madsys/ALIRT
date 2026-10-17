@@ -230,7 +230,7 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 # else
 	/*
 	 * 4.19 ~ 5.4: no arch module_alloc, so the generic kernel/module.c
-	 * allocation is used; runtime-verified on v5.4.290 (DIAG dump):
+	 * allocation is used; runtime-verified on v5.4.290 (CI dump):
 	 * modules start exactly at PFN_ALIGN(_end) - SZ_2G and grow up to
 	 * VMALLOC_END (= PAGE_OFFSET - 1, inclusive) - the 2GB span below
 	 * the kernel image.  The vmalloc bottom is taken by the boot-time
@@ -269,75 +269,6 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 #else
 	alirt_mod_end = VMALLOC_END + 1;
 #endif
-#endif
-
-#if defined(CONFIG_64BIT) && \
-	LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0) && \
-	LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0)
-	/*
-	 * TEMPORARY CI diagnostic (remove once the 4.19 ~ 5.4 module window
-	 * is confirmed fixed): dump every busy vmap_area, with flags and
-	 * physical base.  Mirror layouts are from the v4.19/v5.4
-	 * include/linux/vmalloc.h.  The vm_struct tail (flags@24,
-	 * phys_addr@48, caller@56) is identical on both.
-	 */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
-	/* v4.19 struct vmap_area: flags word after va_end, purge_list and
-	 * rcu_head around vm - the list sits at +48, vm at +72. */
-#define ALIRT_DIAG_VA_LIST_OFF	48UL
-	struct alirt_diag_vmap_area_local {
-		unsigned long va_start;		/* +0  */
-		unsigned long va_end;		/* +8  */
-		unsigned long flags;		/* +16 */
-		unsigned long rb_pad[3];	/* +24 (24B) */
-		struct list_head list;		/* +48 (16B) */
-		unsigned long purge_pad[1];	/* +64 (8B llist_node) */
-		struct vm_struct *vm;		/* +72 */
-	};
-#else
-	/* v5.0 ~ v5.9 struct vmap_area: list at +40, vm at +56. */
-#define ALIRT_DIAG_VA_LIST_OFF	40UL
-	struct alirt_diag_vmap_area_local {
-		unsigned long va_start;		/* +0  */
-		unsigned long va_end;		/* +8  */
-		unsigned long rb_pad[3];	/* +16 (24B) */
-		struct list_head list;		/* +40 (16B) */
-		struct vm_struct *vm;		/* +56 */
-	};
-#endif
-	{
-		unsigned long valist = kln("vmap_area_list");
-		struct list_head *pos;
-		int n = 0;
-
-		if (valist) {
-			pr_info("alirt: DIAG window [%#lx, %#lx) init_mm=%px\n",
-				alirt_mod_start, alirt_mod_end,
-				alirt_mm_init_mm);
-			for (pos = ((struct list_head *)valist)->next;
-			     pos != (struct list_head *)valist && n < 24;
-			     pos = pos->next, n++) {
-				struct alirt_diag_vmap_area_local *va =
-					(void *)((unsigned long)pos -
-						 ALIRT_DIAG_VA_LIST_OFF);
-				struct vm_struct *vm = va->vm;
-
-				if (!vm) {
-					pr_info("alirt: DIAG va %#lx-%#lx vm=NULL\n",
-						va->va_start, va->va_end);
-					continue;
-				}
-				pr_info("alirt: DIAG va %#lx-%#lx flags=%#lx phys=%#llx caller=%pS\n",
-					va->va_start, va->va_end,
-					*(unsigned long *)((unsigned long)vm + 24),
-					*(unsigned long long *)((unsigned long)vm + 48),
-					*(void **)((unsigned long)vm + 56));
-			}
-		} else {
-			pr_info("alirt: DIAG vmap_area_list unresolved\n");
-		}
-	}
-#undef ALIRT_DIAG_VA_LIST_OFF
 #endif
 
 	return alirt_mm_init_mm ? 0 : -ENOENT;

@@ -125,31 +125,31 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 	if (!alirt_mm_init_mm) {
 		/*
 		 * init_mm is a KALLSYMS_ALL-only data symbol and can be
-		 * unresolvable (ppc64 >= 5.7 has no callable
-		 * kallsyms_lookup_name; see alirt_resolve_kln).  init_task
-		 * is exported on every supported kernel and statically
-		 * initialised with active_mm = &init_mm, so it reaches
-		 * init_mm without kallsyms.
-		 *
-		 * current->active_mm is NOT a substitute on this arch:
-		 * radix process page tables carry no kernel mappings
-		 * (kernel accesses from user context are repaired through
-		 * vmalloc_fault against the init_mm tables), so walking
-		 * module space through a user mm rejects every address -
-		 * observed in CI as a silent self-test failure and a scan
-		 * reporting zero candidates on 6.1/6.6/6.12/7.2.
-		 * Gate the substitution on the THIS_MODULE self-test: if
-		 * init_mm's kernel half cannot map our own struct module,
-		 * stay unvalidated rather than walk a foreign layout.
+		 * unresolvable when no callable kallsyms_lookup_name exists
+		 * (see alirt_resolve_kln).  init_task is exported on every
+		 * supported kernel and statically initialised with
+		 * active_mm = &init_mm, so it reaches init_mm without
+		 * kallsyms.  Gate the substitution on the THIS_MODULE
+		 * self-test: if init_mm's kernel half cannot map our own
+		 * struct module, stay unvalidated rather than walk a
+		 * foreign layout.  (On 5.10.271/5.15.180 this read came
+		 * back NULL in CI; the DIAG below identifies why and probes
+		 * current->active_mm as a last resort - radix user tables
+		 * normally mirror the kernel half.)
 		 */
 		extern struct task_struct init_task;
 		struct mm_struct *mm = init_task.active_mm;
 
 		/* DIAG(ppc-skip-path): make the fallback self-test audible; the
 		 * pre-6.1 no-kprobe path relies on it exclusively and a silent
-		 * rejection degrades the scan to zero candidates. */
-		pr_warn("alirt: powerpc fallback: init_task.active_mm=%px current->active_mm=%px\n",
-			mm, current->active_mm);
+		 * rejection degrades the scan to zero candidates.  Also dump
+		 * identity fields: on 5.10.271/5.15.180 the active_mm read came
+		 * back NULL even though init_task.c statically initialises it to
+		 * &init_mm - comm/pid discriminate a wrong base address from a
+		 * genuinely zero field. */
+		pr_warn("alirt: powerpc fallback: init_task=%px comm=%s pid=%d active_mm=%px mm=%px current->active_mm=%px\n",
+			&init_task, init_task.comm, init_task.pid,
+			mm, init_task.mm, current->active_mm);
 		if (mm) {
 			alirt_mm_init_mm = mm;
 #if defined(MODULE) && defined(THIS_MODULE)
@@ -166,6 +166,31 @@ static inline int alirt_mm_init(unsigned long (*kln)(const char *name))
 				pr_warn("alirt: powerpc init_mm unresolvable; "
 					"using init_task.active_mm (&init_mm) "
 					"for the kernel-half walk\n");
+		}
+		/* DIAG: when init_task.active_mm reads as NULL, probe whether
+		 * the borrowed user mm carries usable kernel mappings (radix
+		 * user tables normally mirror the kernel half; only
+		 * not-yet-faulted vmalloc ranges differ, and module space is
+		 * faulted in before we run). */
+		if (!alirt_mm_init_mm && current->active_mm) {
+			bool ok;
+
+			alirt_mm_init_mm = current->active_mm;
+#if defined(MODULE) && defined(THIS_MODULE)
+			ok = THIS_MODULE &&
+				alirt_addr_valid((unsigned long)THIS_MODULE,
+						sizeof(*THIS_MODULE));
+#else
+			ok = alirt_addr_valid((unsigned long)current->active_mm,
+					      sizeof(*current->active_mm));
+#endif
+			pr_warn("alirt: powerpc fallback: current->active_mm walk=%d\n",
+				ok);
+#if defined(MODULE) && defined(THIS_MODULE)
+			if (!ok)
+				alirt_walk_dbg((unsigned long)THIS_MODULE);
+#endif
+			alirt_mm_init_mm = NULL;
 		}
 	}
 	if (!alirt_mm_init_mm)
